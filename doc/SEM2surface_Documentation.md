@@ -65,7 +65,7 @@ based on solving Poisson's equation in Fourier space, see Frankot and Chellappa 
 
     where $\mathcal{F}^{-1}$ is the inverse Fourier transform and $\hat G_x(k_x,k_y)$ and $\hat G_y(k_x,k_y)$ are the Fourier transforms of the gradients $G_x$ and $G_y$.
 
-    2. The method of direct integration is based on the following relations:
+    2. The method of direct integration (see [@fig:surface]) is based on the following relations:
 
     + Assume that the first profile along $y$ is zero $z^{1,j}_x = 0$ for $j\in[1,N_y]$.
     + Integrate the first profile along $x$ direction $z^{i+1,1}_x = z^{i,1}_x + G_x^{i,1} \Delta x$ for $i\in[1,N_x-1]$, where $\Delta x$ is the pixel size.
@@ -73,5 +73,7 @@ based on solving Poisson's equation in Fourier space, see Frankot and Chellappa 
     + Repeat the previous step for all profiles along $y$ direction using $G_y$ to get $z^{i,j}_y$.
     + Remove the average value of $z^{i,j}_x$ and $z^{i,j}_y$, i.e. $z^{i,j}_x = z^{i,j}_x - \langle z^{i,j}_x \rangle$ and $z^{i,j}_y = z^{i,j}_y - \langle z^{i,j}_y \rangle$.
     + Construct the final surface as $z(x,y) = \frac{1}{2} \left( z^{i,j}_x + z^{i,j}_y \right)$.
+
+![Reconstructed surface $z(x,y)$ using direct integration](Surface_DirectIntegration.jpg){#fig:surface}
 
 8. To verify the accuracy of the construction the gradients of the reconstructed surface $\partial z/\partial x$ and $\partial z/\partial y$ are computed and compared with the original gradients $G_x$ and $G_y$.
