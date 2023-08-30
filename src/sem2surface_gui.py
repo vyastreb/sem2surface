@@ -23,10 +23,11 @@ import os, sys
 import tempfile
 from sem2surface import constructSurface
 
-pixelsize = 0.5 # microns
+# Main settings (FIXME to be incorporated into GUI)
 Plot_images_decomposition = True
-GaussFilter = True
+GaussFilter = False
 sigma = 1.
+ReconstructionMode = "FFT" # "FFT" or "DirectIntegration"
 
 def header():
     # printed when running the code
@@ -400,7 +401,7 @@ class SEMto3Dinterface:
 
     def run(self):
         imgNames = list(self.original_filepaths)
-        imgName = constructSurface(imgNames, pixelsize, Plot_images_decomposition, GaussFilter, sigma)
+        imgName = constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, ReconstructionMode)
         self.display_reconstruction(imgName)
 
 if __name__ == "__main__":

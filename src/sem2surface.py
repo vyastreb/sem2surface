@@ -21,6 +21,13 @@ from scipy.ndimage import gaussian_filter
 from skimage.transform import radon
 import matplotlib.gridspec as gridspec
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from scipy.optimize import minimize
+import datetime
+
+save_file_type = "CSV" # "CSV", "NPZ" or "HDF5" or "" for no saving # FIXME bring it to the GUI
+CUTOFF = 0 # Cutoff for high-frequency components in the Fourier space, 0 means no cutoff # FIXME bring it to the GUI
+pixelsize0 = 1e-6 # in meter
+time_stamp = True # Add time stamp to the output files # FIXME bring it to the GUI
 
 # Configure Matplotlib to use LaTeX for text rendering
 plt.rcParams['font.family'] = 'serif'
@@ -34,11 +41,127 @@ def log(logFile, text):
     print("*     "+text)
     logFile.write(text + "\n")
 
-def constructSurface(imgNames, pixelsize, Plot_images_decomposition, GaussFilter, sigma):
-        # Create a log file with time stamp
-        import datetime
+def parabolic_surface(params, X, Y):
+    a, b, c = params
+    x0 = X.shape[1]/2.
+    y0 = X.shape[0]/2.
+    return 0.5*(((X-x0)/a)**2 + ((Y-y0)/b)**2) + c
+def objective_function(params, X, Y, Z):
+    return np.sum((Z - parabolic_surface(params, X, Y))**2)
+
+# Extract pixel size from the tif image file (if it is there)
+def get_pixel_width(filename):
+    with open(filename, 'rb') as file:
+        # Go to the end of the file
+        file.seek(-3000, 2)  # Go 200 characters before the end, adjust if needed
+        # Read the last part of the file
+        content = file.read().decode('ISO-8859-1')
+
+        # print(content)
+        
+        # Find the PixelWidth value
+        pixel_width_str = "PixelWidth="
+        start_index = content.find(pixel_width_str)
+        
+        if start_index != -1:
+            start_index += len(pixel_width_str)
+            end_index = content.find('\n', start_index)
+            pixel_width_value = content[start_index:end_index].strip()
+            return float(pixel_width_value)
+        else:
+            return None
+
+# #######################################################################################
+# Use Frankot and Chellappa method to integrate surface from two gradients
+# See: R.T. Frankot, R. Chellappa (1988). Method for enforcing integrability in 
+# shape from shading algorithms, IEEE Trans. Pattern Anal. Mach. Intell. 10(4):439-451.
+# #######################################################################################
+def reconstruct_surface_FFT(Gx, Gy, pixelsize, cutoff=0):
+    # Fourier transform of the gradients
+    Cx = np.fft.fft2(Gx) *pixelsize
+    Cy = np.fft.fft2(Gy) *pixelsize
+
+    n, m = Gx.shape
+
+    # # Create a 2D Hamming window (if needed, I do not see any changes)
+    # window_1D_n = np.hamming(n)
+    # window_1D_m = np.hamming(m)
+    # window_2D = np.outer(window_1D_n, window_1D_m)
+    # # Apply the window to the image
+    # Gx = Gx * window_2D
+    # Gy = Gy * window_2D
+
+    # Wave numbers
+    kx = np.fft.fftshift(np.arange(0, m) - m / 2) * pixelsize 
+    ky = np.fft.fftshift(np.arange(0, n) - n / 2) * pixelsize 
+    Kx, Ky = np.meshgrid(kx, ky)
+
+    # Cutoff high-frequency components if needed
+    if cutoff > 0:    
+        a2 = (min(m,n)/cutoff)**2
+        b2 = (min(m,n)/cutoff)**2
+        for i in range(m):  
+            for j in range(n):
+                if i**2/a2 + j**2/b2 > 1        and (i-m)**2/a2 + j**2/b2 > 1 and \
+                (i-m)**2/a2 + (j-n)**2/b2 > 1 and i**2/a2 + (j-n)**2/b2 > 1:
+                        Cx[j, i] = 0
+                        Cy[j, i] = 0
+
+    # The minimizer is given by the inverse Fourier transform of the solution
+    eps = 1e-10
+    C = -1j * ( Ky * Cx + Kx * Cy) / (eps + Kx**2 + Ky**2)
+
+    # Return to real space
+    Cinv = np.fft.ifft2(C)
+    z = np.real(Cinv)
+
+    # Set the mean value to zero
+    z = z - np.mean(z)
+
+    return z
+
+# #######################################################################################
+# Use direct integration of the surface from two gradients line by line and ensure
+# the minimal distance between adjacent lines, in the end average the two surfaces
+# #######################################################################################
+def reconstruct_surface_direct_integration(Gx, Gy, pixelsize): 
+    Gx -= np.mean(Gx)
+    Gy -= np.mean(Gy)           
+    Gx = Gx * pixelsize
+    Gy = Gy * pixelsize
+    # Integrate along x-direction
+    int_x = np.cumsum(Gx, axis=0)
+    int_x_aligned = np.zeros(int_x.shape)
+    int_x_aligned[0,:] = 0 #int_x[0,:]
+    for j in range(1, int_x.shape[1]):
+        int_x_aligned[:,j] = int_x[:,j] + np.mean(int_x_aligned[:,j-1] - int_x[:,j])
+    
+    # Integrate along y-direction
+    int_y = np.cumsum(Gy, axis=1)
+    int_y_aligned = np.zeros(int_y.shape)
+    int_y_aligned[:,0] = int_x_aligned[:,0]
+    for i in range(1, int_y.shape[0]):
+        int_y_aligned[i,:] = int_y[i,:] + np.mean(int_y_aligned[i-1,:] - int_y[i,:])
+    
+    int_x_aligned -= np.mean(int_x_aligned)
+    int_y_aligned -= np.mean(int_y_aligned)
+
+    # Assemble the surface by averaging
+    # z = 0.5 * (int_x_aligned + int_y_aligned)
+    z = int_y_aligned
+    
+    # Adjust the mean value to zero
+    z = z - np.mean(z)
+    
+    return z
+
+def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, ReconstructionMode):
+        # Create a log file with time stamp        
         now = datetime.datetime.now()
-        timeStamp = now.strftime("%Y-%m-%d_%H-%M-%S")
+        if time_stamp:
+            timeStamp = now.strftime("%Y-%m-%d_%H-%M-%S")
+        else:
+            timeStamp = "0"
         logFileName = "log_" + timeStamp + ".log"
         logFile = open(logFileName, "w")
         log(logFile,"All information is saved to " + logFileName)
@@ -47,7 +170,13 @@ def constructSurface(imgNames, pixelsize, Plot_images_decomposition, GaussFilter
         log(logFile,"Image names:")
         for imgName in imgNames:
             log(logFile,imgName)
-        log(logFile,"Pixelsize = " + str(pixelsize))
+
+        pixelsize = get_pixel_width(imgNames[0])
+        if pixelsize:
+            log(logFile,"Read from TIF file, PixelWidth = " + str(pixelsize)+ " (m)")
+        else:
+            log(logFile,"!!! Warning !!! PixelWidth is not found in the tif file, it is set to default value <"+str(pixelsize0)+"> (m). Need to set it manually.")
+            pixelsize = pixelsize0
         
 
         tmp = plt.imread(imgNames[0])
@@ -55,7 +184,7 @@ def constructSurface(imgNames, pixelsize, Plot_images_decomposition, GaussFilter
         cutY = tmp.shape[0]
         for i in range(1,tmp.shape[0]):
             if abs(np.mean(tmp[i,:]) - 1437.) < 2:
-                cutY = i
+                cutY = i-1
                 break
         # Save the cutY value to the log file
         log(logFile,"SEM data starts at " + str(cutY))
@@ -165,7 +294,7 @@ def constructSurface(imgNames, pixelsize, Plot_images_decomposition, GaussFilter
         # G1c[mask] = 0
 
 
-        # When done in this manner, radon issues a warning that the image should be zero outside the circle, but it anyway works correctly        
+        # When done in this manner, radon sometimes issues a warning that the image should be zero outside the circle, but it anyway works correctly        
         G1c = np.zeros(G1.shape)
         # G2c = np.zeros(G2.shape)
         xc = G1.shape[0]/2
@@ -259,132 +388,102 @@ def constructSurface(imgNames, pixelsize, Plot_images_decomposition, GaussFilter
             fig.savefig(filename, dpi=300)
             log(logFile,"Gradients along x and y directions are saved to " + filename)
 
+        reconstruction_type = ""
+        if ReconstructionMode == "FFT":
+            z = reconstruct_surface_FFT(Gx, Gy, pixelsize, cutoff=CUTOFF)
+            reconstruction_type = "FFT"
+            z *= 800 # Rather random z-scaling factor
+        elif ReconstructionMode == "DirectIntegration":
+            z = reconstruct_surface_direct_integration(Gx, Gy, pixelsize)
+            z *= 1e6 # convert to micrometers
+            reconstruction_type = "DirectIntegration"
+        else:
+            log(logFile,"Error, unknown reconstruction mode")
+            logFile.close()
+            return None      
 
+        n,m = z.shape
+        X,Y = np.meshgrid(np.arange(0, m), np.arange(0, n))
 
-        # ##############################################################################
-        # # Use Frankot and Chellappa method to integrate surface from two gradients
-        # # See: R.T. Frankot, R. Chellappa (1988). Method for enforcing integrability in shape from shading algorithms, IEEE Trans. Pattern Anal. Mach. Intell. 10(4):439-451.
-        # ##############################################################################
+        # Remove curvature defect
+        # initial_params = [n/10., m/10., 0]
 
-        # def reconstruct_surface_FFT(Gx, Gy):
-        #     # Fourier transform of the gradients
-        #     Cx = np.fft.fft2(Gx)
-        #     Cy = np.fft.fft2(Gy)
+        # # Minimize the squared difference between z(x, y) and p(x, y)
+        # result = minimize(objective_function, initial_params, args=(X, Y, z), bounds=[(0, None), (0, None), (-np.inf, np.inf)])
 
-        #     # Image size
-        #     n, m = Gx.shape
+        # # Subtract the parabolic surface
+        # a, b, c = result.x
+        # log(logFile,"Curvature defect removal, parameters: Rx = " + str(a) + ", Ry = " + str(b))
+        # P = parabolic_surface(result.x, X, Y)
+        # z -= P
 
-        #     # Wave numbers
-        #     kx = np.fft.fftshift(np.arange(0, m) - m / 2) * (2 * np.pi / m)
-        #     ky = np.fft.fftshift(np.arange(0, n) - n / 2) * (2 * np.pi / n)
+        pixelsize *= 1e6  # convert to micrometers
 
-        #     # Expand to 2D matrices
-        #     Kx, Ky = np.meshgrid(kx, ky)
-
-        #     # Integrate in Fourier space
-        #     C = -1j * (Kx * Cx + Ky * Cy) / (Kx**2 + Ky**2)
-
-        #     # Don't divide by zero (set DC to zero)
-        #     C[0, 0] = 0
-
-        #     # Return to real space
-        #     z = np.real(np.fft.ifft2(C))
-
-        #     # Set the mean value to zero
-        #     z = z - np.mean(z)
-
-        #     return z
-
-        # z = reconstruct_surface_FFT(Gx, Gy).real
-        # # Remove mean
-        # z -= np.mean(z, axis=0)
-        # # z -= np.mean(z, axis=1)[:, np.newaxis]
-
-        # # Plot the surface
-        # fig,ax = plt.subplots()
-        # bar = plt.imshow(z)
-        # plt.colorbar(bar)
-        # plt.title("Surface")
-        # # Save with a unique identifier with a time tag and save in info in log file
-        # filename = "Surface_FFT_" + timeStamp + ".png"
-        # fig.savefig(filename, dpi=300)
-        # log(logFile,"Surface reconstructed using FFT is saved to " + filename + "\n")
-
-        
-        # Direct integration
-        def integrate_profiles(Gx, Gy):            
-            # Integrate along x-direction
-            int_x = np.cumsum(Gx, axis=0)
-            int_x_aligned = np.zeros(int_x.shape)
-            int_x_aligned[0,:] = int_x[0,:]
-            for j in range(1, int_x.shape[1]):
-                int_x_aligned[:,j] = int_x[:,j] + np.mean(int_x_aligned[:,j-1] - int_x[:,j])
-            
-            # Integrate along y-direction
-            int_y = np.cumsum(Gy, axis=1)
-            int_y_aligned = np.zeros(int_y.shape)
-            int_y_aligned[:,0] = int_y[:,0]
-            for i in range(1, int_y.shape[0]):
-                int_y_aligned[i,:] = int_y[i,:] + np.mean(int_y_aligned[i-1,:] - int_y[i,:])
-            
-            int_x_aligned -= np.mean(int_x_aligned)
-            int_y_aligned -= np.mean(int_y_aligned)
-
-            # Assemble the surface by averaging
-            z = 0.5 * (int_x_aligned + int_y_aligned)
-            
-            # Adjust the mean value to zero
-            z = z - np.mean(z)
-            
-            return z
-
-        z = integrate_profiles(Gx, Gy)
-        z -= np.mean(z, axis=0)
-        # z -= np.mean(z, axis=1)[:, np.newaxis]
-
-        # Plot the surface
+        # Plot the surface        
         fig, ax = plt.subplots()
-        im = ax.imshow(z)
+        img = ax.imshow(z, extent=[0, X.shape[1]*pixelsize, 0, X.shape[0]*pixelsize], interpolation="none")
+        ax.set_xlabel("$x$, $\mu$m")
+        ax.set_ylabel("$y$, $\mu$m")
+        ax.set_title("Surface, optimized")
+
+        # Create a new set of axes above the main axes
         divider = make_axes_locatable(ax)
-        cax = divider.append_axes("bottom", size="5%", pad=0.5)
-        cbar = plt.colorbar(im, cax=cax, orientation='horizontal')
-        cbar.set_label('Surface height $z$', size=12)
-        ax.set_title("Surface")
-        plt.tight_layout()  # Adjust layout to ensure everything fits nicely
-        # Save with a unique identifier with a time tag and save in info in log file
-        filename = "Surface_DirectIntegration_" + timeStamp + ".png"
+        cax = divider.append_axes("top", size="5%", pad=0.5)
+
+        # Add the colorbar to the new set of axes
+        cbar = plt.colorbar(img, cax=cax, orientation='horizontal')
+        cbar.set_label('$z$, $\mu$m')
+        cax.xaxis.set_ticks_position('top')
+        cax.xaxis.set_label_position('top')
+
+        filename = "Surface_"+reconstruction_type+"_" + timeStamp + ".png"
+        plt.tight_layout()
         fig.savefig(filename, dpi=300)
+        log(logFile, "Surface reconstructed using " + reconstruction_type + " is saved to " + filename)
 
-
-        # Plot the surface again
+        # Plot the surface again in grayscale
         fig,ax = plt.subplots()
         ax.imshow(z, cmap='gray')
-
-        # Turn off the axis
         ax.axis('off')
         ax.set_aspect('auto')
         fig.subplots_adjust(left=0, right=1, top=1, bottom=0, wspace=0, hspace=0)
-        # Save with a unique identifier with a time tag and save in info in log file
-        imgName = "SurfaceF_DirectIntegration_" + timeStamp + ".png"
+        imgName = "SurfaceF_" + reconstruction_type + "_" + timeStamp + ".png"
         fig.savefig(imgName, dpi=300)
 
         # save in ASCII file readable by gnuplot with the format # x, y, z and empty lines between each row
-        x = np.linspace(0, z.shape[0]*pixelsize, num=z.shape[1])
+        x = np.linspace(0, z.shape[0]*pixelsize, num = z.shape[1])
         y = np.linspace(0, z.shape[1]*pixelsize, num = z.shape[0])
         X, Y = np.meshgrid(x, y)
-        Z = z
-        # Save the surface in a file and save info in log file
-        filename = "Surface_" + timeStamp + ".dat"
-        log(logFile,"Surface saved to " + filename)
-        with open(filename, "w") as f:
+        if save_file_type == "CSV":
+            filename = "Surface_" + timeStamp + ".csv"
+            log(logFile,"Surface saved to " + filename)
+            f = open(filename, "w")
+            f.write("# x (um), y (um), z (um)\n")           
             for i in range(z.shape[0]):
                 for j in range(z.shape[1]):
-                    f.write("{0:.6f} {1:.6f} {2:.6f}\n".format(X[i,j], Y[i,j], Z[i,j]))
-                f.write("\n")
+                    f.write("{0:.6f},{1:.6f},{2:.6f}\n".format(X[i,j], Y[i,j], z[i,j]))
+            f.close()
+        elif save_file_type == "NPZ":
         # Save as npz file
-        filename = "Surface_" + timeStamp + ".npz"
-        np.savez(filename, X=X, Y=Y, Z=Z)
-        log(logFile,"Surface saved to " + filename)
+            filename = "Surface_" + timeStamp + ".npz"
+            np.savez(filename, X=X, Y=Y, Z=z)
+            log(logFile,"Surface saved to " + filename)
+        elif save_file_type == "HDF5":
+        # Save as hdf5 file
+            filename = "Surface_" + timeStamp + ".hdf5"
+            import h5py
+            f = h5py.File(filename, 'w')
+            # provide information about units
+            f.attrs['units'] = 'um'
+            f.create_dataset('X', data=X)
+            f.create_dataset('Y', data=Y)
+            f.create_dataset('Z', data=z)
+            f.close()
+            log(logFile,"Surface saved to " + filename)
+        else:
+            log(logFile,"Surface is not saved")
+
+        now = datetime.datetime.now()
         log(logFile,"Successfully finished at " + now.strftime("%Y-%m-%d %H:%M:%S") + "\n")
         logFile.close()
 
