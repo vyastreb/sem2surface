@@ -5,8 +5,9 @@
 # Reconstructor for 3D surface from SEM images from                         #
 # at least 3 BSE detectors without knowledge of their orientation           #
 #                                                                           #
-# The reconstruction relies on PCA decomposition and Radon transform        #
-# or direct integration of the gradients                                    #
+# The reconstruction relies on SVD-PCA extraction, Radon transform          #
+# and Frankot-Chellappa FFT-based reconstruction technique or               #
+# direct integration from dz/dx and dz/dy gradients                         #
 #                                                                           #
 # V.A. Yastrebov, CNRS, MINES Paris, Aug, 2023                              #
 # Licence: BSD 3-Clause                                                     #
@@ -26,8 +27,9 @@ import datetime
 
 save_file_type = "CSV" # "CSV", "NPZ" or "HDF5" or "" for no saving # FIXME bring it to the GUI
 CUTOFF = 0 # Cutoff for high-frequency components in the Fourier space, 0 means no cutoff # FIXME bring it to the GUI
-pixelsize0 = 1e-6 # in meter
-time_stamp = True # Add time stamp to the output files # FIXME bring it to the GUI
+pixelsize0 = 1e-6 # default value in meter
+time_stamp = False # Add time stamp to the output files # FIXME bring it to the GUI
+ZscalingFactor = 400 # Rather random z-scaling factor, normally should be extracted from known topography, e.g. indenter imprint # FIXME bring it to the GUI
 
 # Configure Matplotlib to use LaTeX for text rendering
 plt.rcParams['font.family'] = 'serif'
@@ -78,8 +80,8 @@ def get_pixel_width(filename):
 # #######################################################################################
 def reconstruct_surface_FFT(Gx, Gy, pixelsize, cutoff=0):
     # Fourier transform of the gradients
-    Cx = np.fft.fft2(Gx) *pixelsize
-    Cy = np.fft.fft2(Gy) *pixelsize
+    Cx = np.fft.fft2(Gx) 
+    Cy = np.fft.fft2(Gy) 
 
     n, m = Gx.shape
 
@@ -92,8 +94,8 @@ def reconstruct_surface_FFT(Gx, Gy, pixelsize, cutoff=0):
     # Gy = Gy * window_2D
 
     # Wave numbers
-    kx = np.fft.fftshift(np.arange(0, m) - m / 2) * pixelsize 
-    ky = np.fft.fftshift(np.arange(0, n) - n / 2) * pixelsize 
+    kx = np.fft.fftshift(np.arange(0, m) - m / 2) 
+    ky = np.fft.fftshift(np.arange(0, n) - n / 2)  
     Kx, Ky = np.meshgrid(kx, ky)
 
     # Cutoff high-frequency components if needed
@@ -108,8 +110,8 @@ def reconstruct_surface_FFT(Gx, Gy, pixelsize, cutoff=0):
                         Cy[j, i] = 0
 
     # The minimizer is given by the inverse Fourier transform of the solution
-    eps = 1e-10
-    C = -1j * ( Ky * Cx + Kx * Cy) / (eps + Kx**2 + Ky**2)
+    denom = Kx**2 + Ky**2
+    C = np.where(denom != 0, -1j * ( Ky * Cx + Kx * Cy) / denom, 0)
 
     # Return to real space
     Cinv = np.fft.ifft2(C)
@@ -392,7 +394,7 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
         if ReconstructionMode == "FFT":
             z = reconstruct_surface_FFT(Gx, Gy, pixelsize, cutoff=CUTOFF)
             reconstruction_type = "FFT"
-            z *= 800 # Rather random z-scaling factor
+            z *= ZscalingFactor # Rather random z-scaling factor
         elif ReconstructionMode == "DirectIntegration":
             z = reconstruct_surface_direct_integration(Gx, Gy, pixelsize)
             z *= 1e6 # convert to micrometers
@@ -406,16 +408,17 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
         X,Y = np.meshgrid(np.arange(0, m), np.arange(0, n))
 
         # Remove curvature defect
-        # initial_params = [n/10., m/10., 0]
+        initial_params = [n/5., m/5., 0]
+        initial_params = [100, 100, 0]
 
-        # # Minimize the squared difference between z(x, y) and p(x, y)
-        # result = minimize(objective_function, initial_params, args=(X, Y, z), bounds=[(0, None), (0, None), (-np.inf, np.inf)])
+        # Minimize the squared difference between z(x, y) and p(x, y)
+        result = minimize(objective_function, initial_params, args=(X, Y, z), bounds=[(0.1, None), (0.1, None), (-np.inf, np.inf)])
 
-        # # Subtract the parabolic surface
-        # a, b, c = result.x
-        # log(logFile,"Curvature defect removal, parameters: Rx = " + str(a) + ", Ry = " + str(b))
-        # P = parabolic_surface(result.x, X, Y)
-        # z -= P
+        # Subtract the parabolic surface
+        a, b, c = result.x
+        log(logFile,"Curvature defect removal, parameters: Rx = " + str(a) + ", Ry = " + str(b))
+        P = parabolic_surface(result.x, X, Y)
+        z -= P
 
         pixelsize *= 1e6  # convert to micrometers
 
@@ -462,6 +465,7 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
             for i in range(z.shape[0]):
                 for j in range(z.shape[1]):
                     f.write("{0:.6f},{1:.6f},{2:.6f}\n".format(X[i,j], Y[i,j], z[i,j]))
+                f.write("\n")
             f.close()
         elif save_file_type == "NPZ":
         # Save as npz file

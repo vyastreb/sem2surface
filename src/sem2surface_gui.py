@@ -5,9 +5,10 @@
 # Reconstructor for 3D surface from SEM images from                         #
 # at least 3 BSE detectors without knowledge of their orientation           #
 #                                                                           #
-# The reconstruction relies on PCA decomposition and Radon transform        #
-# or direct integration of the gradients                                    #
-#                                                                           #                          
+# The reconstruction relies on SVD-PCA extraction, Radon transform          #
+# and Frankot-Chellappa FFT-based reconstruction technique or               #
+# direct integration from dz/dx and dz/dy gradients                         #
+#                                                                           #                                                                           #                          
 # V.A. Yastrebov, CNRS, MINES Paris, Aug, 2023                              # 
 # Licence: BSD 3-Clause                                                     #
 #                                                                           #
@@ -27,7 +28,7 @@ from sem2surface import constructSurface
 Plot_images_decomposition = True
 GaussFilter = False
 sigma = 1.
-ReconstructionMode = "FFT" # "FFT" or "DirectIntegration"
+ReconstructionMode = "FFT" # "FFT" or "DirectIntegration"  # FIXME bring it to the GUI
 
 def header():
     # printed when running the code
