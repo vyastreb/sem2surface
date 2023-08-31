@@ -20,7 +20,12 @@ import numpy as np
 import sem2surface as s2s
 
 # Load the data
-imgNames = ["00_P33_7kV_spot4.5_FOV500um_multiABS_A.tif", "00_P33_7kV_spot4.5_FOV500um_multiABS_B.tif", "00_P33_7kV_spot4.5_FOV500um_multiABS_C.tif"]
+# imgNames = ["00_P33_7kV_spot4.5_FOV500um_multiABS_A.tif",\
+#             "00_P33_7kV_spot4.5_FOV500um_multiABS_B.tif",\
+#             "00_P33_7kV_spot4.5_FOV500um_multiABS_C.tif"]
+imgNames = ["11_P33_20230818_7kV_spot4.5_FOV100um_multiBSE_A_01.tif",\
+            "11_P33_20230818_7kV_spot4.5_FOV100um_multiBSE_B_01.tif",\
+            "11_P33_20230818_7kV_spot4.5_FOV100um_multiBSE_C_01.tif"]
 
 Plot_images_decomposition = False
 GaussFilter = False
@@ -28,3 +33,4 @@ sigma = 1.
 ReconstructionMode = "FFT" # "FFT" or "DirectIntegration"  # FIXME bring it to the GUI
 
 _ = s2s.constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, ReconstructionMode)
+exit(0)

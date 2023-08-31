@@ -28,7 +28,7 @@ import datetime
 save_file_type = "CSV" # "CSV", "NPZ" or "HDF5" or "" for no saving # FIXME bring it to the GUI
 CUTOFF = 0 # Cutoff for high-frequency components in the Fourier space, 0 means no cutoff # FIXME bring it to the GUI
 pixelsize0 = 1e-6 # default value in meter
-time_stamp = False # Add time stamp to the output files # FIXME bring it to the GUI
+time_stamp = True # Add time stamp to the output files # FIXME bring it to the GUI
 ZscalingFactor = 400 # Rather random z-scaling factor, normally should be extracted from known topography, e.g. indenter imprint # FIXME bring it to the GUI
 
 # Configure Matplotlib to use LaTeX for text rendering
