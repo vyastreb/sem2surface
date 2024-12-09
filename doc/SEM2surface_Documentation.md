@@ -7,7 +7,7 @@ header-includes: |
   \affil{CNRS, Mines Paris - PSL, Centre des matériaux, Evry/Paris, France}
 ---
 
-
+**License:** [Creative Commons Attribution 4.0 International License](https://creativecommons.org/licenses/by/4.0/)
 
 ## 1. Overview
 
@@ -57,31 +57,26 @@ where $\langle G_x \rangle$ and $\langle G_y \rangle$ are the average values of 
 
 ![Gradients $G_x = \partial z/\partial x$ and $G_y = \partial z/\partial y$](Gradients.jpg){#fig:gradients}
 
-7. To reconstruct the surface from the gradients $G_x = \partial z/\partial x$ and $G_y = \partial z/\partial y$ we use alternatively two methods. The one is 
-based on solving Poisson's equation in Fourier space, see [@frankot]. The second method is a direct integration along $x$ and $y$ direction followed by minimizing distance between adjacent profiles and averaging between profiles integrated along $x$ and $y$.
-
-
-    1. The Frankot & Chellappa method, providing very high reconstruction quality (see [@fig:surface_fft]), is based on the following Fourier transform pair:
-
+7. To reconstruct the surface from the gradients $G_x = \partial z/\partial x$ and $G_y = \partial z/\partial y$, we use a method based on Fourier transform, see [@frankot]. The Frankot & Chellappa method, providing very high reconstruction quality (see [@fig:surface_fft]), is based on the following Fourier transform pair:
     + $\partial^2 z/\partial x^2 \leftrightarrow -k_x^2 \hat z(k_x,k_y)$
     + $\partial^2 z/\partial y^2 \leftrightarrow -k_y^2 \hat z(k_x,k_y)$
-
-    where $\hat z(k_x,k_y)$ is the Fourier transform of the surface $z(x,y)$ and $k_x,k_y$ are the wave numbers. The surface is then reconstructed as follows:
-
+where $\hat z(k_x,k_y)$ is the Fourier transform of the surface $z(x,y)$ and $k_x,k_y$ are the wave numbers. 
+The surface is then reconstructed as follows:
     + $\hat z(k_x,k_y) = -\frac{1}{k_x^2+k_y^2} \left( k_x \hat G_x(k_x,k_y) + k_y \hat G_y(k_x,k_y) \right)$
     + $z(x,y) = \mathcal{F}^{-1}\left\{ \hat z(k_x,k_y) \right\}$
+where $\mathcal{F}^{-1}$ is the inverse Fourier transform and $\hat G_x(k_x,k_y)$ and $\hat G_y(k_x,k_y)$ are the Fourier transforms of the gradients $G_x$ and $G_y$.
 
-    where $\mathcal{F}^{-1}$ is the inverse Fourier transform and $\hat G_x(k_x,k_y)$ and $\hat G_y(k_x,k_y)$ are the Fourier transforms of the gradients $G_x$ and $G_y$.
-    2. The method of direct integration, 
-    which in general provide results of much lower quality, is based on the following relations:
-+ Assume that the first profile along $y$ is zero $z^{1,j}_x = 0$ for $j\in[1,N_y]$.
-+ Integrate the first profile along $x$ direction $z^{i+1,1}_x = z^{i,1}_x + G_x^{i,1} \Delta x$ for $i\in[1,N_x-1]$, where $\Delta x$ is the pixel size.
-+ Integrate next profile along $x$ direction $\tilde z^{i+1,j}_x = z^{i,j}_x + G_x^{i,j} \Delta x$ for $i\in[1,N_x-1]$ and $j\in[2,N_y]$ and remove the average difference with respect to the previous provile $z^{i+1,j}_x = \tilde z^{i+1,j}_x - \langle \tilde z^{i+1,j}_x - z^{i+1,j-1}_x \rangle$.
-+ Repeat the previous step for all profiles along $y$ direction using $G_y$ to get $z^{i,j}_y$.
-+ Remove the average value of $z^{i,j}_x$ and $z^{i,j}_y$, i.e. $z^{i,j}_x = z^{i,j}_x - \langle z^{i,j}_x \rangle$ and $z^{i,j}_y = z^{i,j}_y - \langle z^{i,j}_y \rangle$.
-+ Construct the final surface as $z(x,y) = \frac{1}{2} \left( z^{i,j}_x + z^{i,j}_y \right)$.
+If one wants to reconstruct only main features of the roughness and ignore or smooth out small scale roughness, then a cut-off frequency can be introduced, in the GUI it is called `FFT cutoff` and provides the maximal wave number $k_{\max}$ (in percentage of Niquest frequency) beyond which the Fourier components are set to zero.
 
 ![FFT reconstruction of the surface $z(x,y)$](fft_reconstruction.png){#fig:surface_fft}
+
+7.b. An alternative method is a direct integration along $x$ and $y$ direction followed by minimizing distance between adjacent profiles and averaging between profiles integrated along $x$ and $y$. In general, this method provides results of much lower quality, and is based on the following relations:
+    + Assume that the first profile along $y$ is zero $z^{1,j}_x = 0$ for $j\in[1,N_y]$.
+    + Integrate the first profile along $x$ direction $z^{i+1,1}_x = z^{i,1}_x + G_x^{i,1} \Delta x$ for $i\in[1,N_x-1]$, where $\Delta x$ is the pixel size.
+    + Integrate next profile along $x$ direction $\tilde z^{i+1,j}_x = z^{i,j}_x + G_x^{i,j} \Delta x$ for $i\in[1,N_x-1]$ and $j\in[2,N_y]$ and remove the average difference with respect to the previous provile $z^{i+1,j}_x = \tilde z^{i+1,j}_x - \langle \tilde z^{i+1,j}_x - z^{i+1,j-1}_x \rangle$.
+    + Repeat the previous step for all profiles along $y$ direction using $G_y$ to get $z^{i,j}_y$.
+    + Remove the average value of $z^{i,j}_x$ and $z^{i,j}_y$, i.e. $z^{i,j}_x = z^{i,j}_x - \langle z^{i,j}_x \rangle$ and $z^{i,j}_y = z^{i,j}_y - \langle z^{i,j}_y \rangle$.
+    + Construct the final surface as $z(x,y) = \frac{1}{2} \left( z^{i,j}_x + z^{i,j}_y \right)$.
 
 ![Reconstructed surface $z(x,y)$ using direct integration](0Surface_DirectIntegration_0.png){#fig:surface}
 
