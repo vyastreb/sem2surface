@@ -49,8 +49,8 @@ Users can easily upload a minimum of three images (supported formats: JPG, PNG, 
 ## Additional Information
 
 - **Developer**: Vladislav A. Yastrebov
-  - Affiliation: CNRS, MINES Paris, PSL, Centre des matériaux
-  - Date: August 2023
+  - Affiliation: CNRS, Mines Paris - PSL, Centre des matériaux, Evry/Paris, France
+  - Date: Aug 2023 - Dec 2024
   - [yastrebov.fr](https://yastrebov.fr)
 - **Licence**: BSD 3-Clause License.
 
