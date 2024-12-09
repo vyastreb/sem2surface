@@ -1,8 +1,10 @@
-# SEM/BSE 3D Surface Reconstruction
+# `sem2surface` a Tool for 3D Surface Reconstruction from Multi-Detector SEM/BSE Images
 
 ## Overview
 
 This repository contains a Python-based solution for 3D surface reconstruction from SEM/BSE images captured using a minimum of three detectors. The methodology leverages the Principal Component Analysis (PCA) of the captured images to discern the principal component images [1]. To reorient gradient images along $x$ and $y$ axes, the Radon transform is used. The final 3D surface, represented as \(z(x,y)\), is derived from its gradients either through the Frankot and Chellappa method [2] or via direct integration paired with a minimization process between adjacent profiles.
+
+![3D Surface Reconstruction from milti-detector SEM](explication.png)
 
 ## Features
 
@@ -13,14 +15,14 @@ This repository contains a Python-based solution for 3D surface reconstruction f
   - Gradients visualisation along $x$ and $y$ (PNG format).
   - 3D map of the reconstructed surface (2 PNG files).
   - ASCII representation of the reconstructed surface with \(x,y,z\) columns.
-  - Surface roughness data (NPZ format).
+  - Surface roughness data (CVS,VTK or NPZ format).
   - Detailed log file capturing all operations (TXT format).
 
 ## Getting Started
 
 To launch the interface, execute the following command:
 ```
-$ python sem2surface.py
+$ python sem2surface_gui.py
 ```
 Users can easily upload a minimum of three images (supported formats: JPG, PNG, TIFF, BMP) and initiate the reconstruction process by clicking the "3D Reconstruct" button.
 
@@ -29,9 +31,11 @@ Users can easily upload a minimum of three images (supported formats: JPG, PNG, 
 - `src/`
   - `sem2surface.py`: Core module for 3D surface reconstruction from SEM/BSE images.
   - `sem2surface_gui.py`: GUI module.
+  - `VickersFit.py`: Module to find scaling factor from Vickers hardness test's imprint.
   - `logo.png`, `logo.svg`: Application logo.
 - `doc/`
-  - `SEM2surface.pdf`: Concise documentation.
+  - `sem2surface.pdf`: Concise documentation.
+  - other source files for the documentation.
 - `example/`
   - Sample SEM images from different detectors.
   - Sample output of the reconstructed surface.
