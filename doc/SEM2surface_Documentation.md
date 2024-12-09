@@ -1,12 +1,17 @@
 ---
-title: SEM/BSE 3D Surface Reconstruction
-author: Vladislav A. Yastrebov
-date: August 2023
+title: 3D Surface Reconstruction from SEM/BSE multi-detector images
+date: August 2023 - Dec 2024
+header-includes: |
+  \usepackage{authblk}
+  \author{Vladislav A. Yastrebov}
+  \affil{CNRS, Mines Paris - PSL, Centre des matériaux, Evry/Paris, France}
 ---
+
+
 
 ## 1. Overview
 
-This script reconstructs 3D surfaces from SEM images obtained from at least 3 BSE detectors without prior knowledge of their orientation. The reconstruction is based on SVD decomposition, x and y gradient components are obtained using Radon transform, the full surface is reconstructed either by direct direct gradient integration or by an FFT-based method by Frankot and Chellappa (1988). 
+This script reconstructs 3D surfaces from SEM images obtained from at least 3 BSE detectors without prior knowledge of their orientation. The reconstruction is based on SVD decomposition, x and y gradient components are obtained using Radon transform, the full surface is reconstructed either by direct gradient integration or, preferably, by an FFT-based method by [@frankot]. The whole strategy is based on the method described in [@neggers]. 
 
 ## 2. Method
 
@@ -16,7 +21,7 @@ Below we list the main steps of the method:
 
     + It is supposed that the SEM image has information block (FOV, magnification, etc.) in the bottom side of the image. This block is automatically trimmed. If it is not the case, the user can manually trim the image.
     + Image names with the full path is stored in the log file.
-    + If requested Gaussian filter is applied to the images.
+    + If requested, a Gaussian filter is applied to the images.
 
 ![Original SEM images from three BSE detectors](sems.jpg){#fig:original_image}
 
@@ -24,7 +29,7 @@ Below we list the main steps of the method:
 
 3. A Singular Value Decomposition (SVD) of the correlation matrix is performed: $C_{ij} = \sum_{k=1}^N U_{ik}S_kV_{jk}$.
 
-4. The first three columns of the matrix $U$ are used to construct the intensity image and x and y components of the gradient (along unknown principal directions) as follows (see [@fig:decomposition]):
+4. The first three columns of the matrix $U$ are used to construct the intensity image and two components of the gradient (along unknown principal directions) as follows (see [@fig:decomposition]):
 
     + Intensity: $A = \sum_i U_{i1} I_i$.
     + Gradient 1: $G_1 = \sum_i  U_{i2} I_i / A$
@@ -44,16 +49,19 @@ The second principal direction $\theta_2$ is perpendicular to the first one. It 
 
 In addition, a macroscopic tilt is substracted from these gradients (see [@fig:gradients]). The tilt is computed as the average of the gradients over the whole image.
 
-    + $G_x = G_x - \langle G_x \rangle$
-    + $G_y = G_y - \langle G_y \rangle$
++ $G_x = G_x - \langle G_x \rangle$
++ $G_y = G_y - \langle G_y \rangle$
+
+where $\langle G_x \rangle$ and $\langle G_y \rangle$ are the average values of the gradients $G_x$ and $G_y$.
+
 
 ![Gradients $G_x = \partial z/\partial x$ and $G_y = \partial z/\partial y$](Gradients.jpg){#fig:gradients}
 
 7. To reconstruct the surface from the gradients $G_x = \partial z/\partial x$ and $G_y = \partial z/\partial y$ we use alternatively two methods. The one is 
-based on solving Poisson's equation in Fourier space, see Frankot and Chellappa (1988) [@ref:frankot]. The second method is a direct integration along $x$ and $y$ direction followed by minimizing distance between adjacent profiles and averaging between profiles integrated along $x$ and $y$.
+based on solving Poisson's equation in Fourier space, see [@frankot]. The second method is a direct integration along $x$ and $y$ direction followed by minimizing distance between adjacent profiles and averaging between profiles integrated along $x$ and $y$.
 
 
-    1. The Frankot & Chellappa method is based on the following Fourier transform pair:
+    1. The Frankot & Chellappa method, providing very high reconstruction quality (see [@fig:surface_fft]), is based on the following Fourier transform pair:
 
     + $\partial^2 z/\partial x^2 \leftrightarrow -k_x^2 \hat z(k_x,k_y)$
     + $\partial^2 z/\partial y^2 \leftrightarrow -k_y^2 \hat z(k_x,k_y)$
@@ -64,16 +72,22 @@ based on solving Poisson's equation in Fourier space, see Frankot and Chellappa 
     + $z(x,y) = \mathcal{F}^{-1}\left\{ \hat z(k_x,k_y) \right\}$
 
     where $\mathcal{F}^{-1}$ is the inverse Fourier transform and $\hat G_x(k_x,k_y)$ and $\hat G_y(k_x,k_y)$ are the Fourier transforms of the gradients $G_x$ and $G_y$.
+    2. The method of direct integration, 
+    which in general provide results of much lower quality, is based on the following relations:
++ Assume that the first profile along $y$ is zero $z^{1,j}_x = 0$ for $j\in[1,N_y]$.
++ Integrate the first profile along $x$ direction $z^{i+1,1}_x = z^{i,1}_x + G_x^{i,1} \Delta x$ for $i\in[1,N_x-1]$, where $\Delta x$ is the pixel size.
++ Integrate next profile along $x$ direction $\tilde z^{i+1,j}_x = z^{i,j}_x + G_x^{i,j} \Delta x$ for $i\in[1,N_x-1]$ and $j\in[2,N_y]$ and remove the average difference with respect to the previous provile $z^{i+1,j}_x = \tilde z^{i+1,j}_x - \langle \tilde z^{i+1,j}_x - z^{i+1,j-1}_x \rangle$.
++ Repeat the previous step for all profiles along $y$ direction using $G_y$ to get $z^{i,j}_y$.
++ Remove the average value of $z^{i,j}_x$ and $z^{i,j}_y$, i.e. $z^{i,j}_x = z^{i,j}_x - \langle z^{i,j}_x \rangle$ and $z^{i,j}_y = z^{i,j}_y - \langle z^{i,j}_y \rangle$.
++ Construct the final surface as $z(x,y) = \frac{1}{2} \left( z^{i,j}_x + z^{i,j}_y \right)$.
 
-    2. The method of direct integration (see [@fig:surface]) is based on the following relations:
+![FFT reconstruction of the surface $z(x,y)$](fft_reconstruction.png){#fig:surface_fft}
 
-    + Assume that the first profile along $y$ is zero $z^{1,j}_x = 0$ for $j\in[1,N_y]$.
-    + Integrate the first profile along $x$ direction $z^{i+1,1}_x = z^{i,1}_x + G_x^{i,1} \Delta x$ for $i\in[1,N_x-1]$, where $\Delta x$ is the pixel size.
-    + Integrate next profile along $x$ direction $\tilde z^{i+1,j}_x = z^{i,j}_x + G_x^{i,j} \Delta x$ for $i\in[1,N_x-1]$ and $j\in[2,N_y]$ and remove the average difference with respect to the previous provile $z^{i+1,j}_x = \tilde z^{i+1,j}_x - \langle \tilde z^{i+1,j}_x - z^{i+1,j-1}_x \rangle$.
-    + Repeat the previous step for all profiles along $y$ direction using $G_y$ to get $z^{i,j}_y$.
-    + Remove the average value of $z^{i,j}_x$ and $z^{i,j}_y$, i.e. $z^{i,j}_x = z^{i,j}_x - \langle z^{i,j}_x \rangle$ and $z^{i,j}_y = z^{i,j}_y - \langle z^{i,j}_y \rangle$.
-    + Construct the final surface as $z(x,y) = \frac{1}{2} \left( z^{i,j}_x + z^{i,j}_y \right)$.
+![Reconstructed surface $z(x,y)$ using direct integration](0Surface_DirectIntegration_0.png){#fig:surface}
 
-![Reconstructed surface $z(x,y)$ using direct integration](Surface_DirectIntegration.jpg){#fig:surface}
+8. The final step is the removal of the curvature of the surface. This is done by fitting a parabolic surface in principal axes 
+$$z(x,y) = \frac{x^2}{R_x^2} + \frac{y^2}{R_y^2} + z_0$$ 
+and substracting it from the surface. The curvatures $R_x,R_y$  and the off-set $z_0$ are obtained by the least square fitting procedure.
 
-8. To verify the accuracy of the construction the gradients of the reconstructed surface $\partial z/\partial x$ and $\partial z/\partial y$ are computed and compared with the original gradients $G_x$ and $G_y$.
+## References
+

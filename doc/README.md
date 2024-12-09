@@ -1,6 +1,8 @@
-# MD to PDF converter
+# Documentation `sem2surface`
 
-To convert markdown documentation to PDF use `pandoc`
++ The theoretical documentation is available in `sem2surface.pdf`.
++ The source file is `SEM2surface_Documentation.md`.
++ To convert markdown documentation to PDF use `pandoc`
 ```
-$ pandoc SEM2surface_Documentation.md -o Doc.pdf --pdf-engine=xelatex --filter pandoc-crossref --include-in-header=setup.tex
+$ pandoc SEM2surface_Documentation.md -o sem2surface.pdf --pdf-engine=xelatex   --filter pandoc-crossref   --bibliography=references.bib   --csl=eng_bib_style.csl
 ```
