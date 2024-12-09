@@ -8,8 +8,8 @@
 # The reconstruction relies on SVD-PCA extraction, Radon transform          #
 # and Frankot-Chellappa FFT-based reconstruction technique or               #
 # direct integration from dz/dx and dz/dy gradients                         #
-#                                                                           #                                                                           #                          
-# V.A. Yastrebov, CNRS, MINES Paris, Aug, 2023                              # 
+#                                                                           #                          
+# V.A. Yastrebov, CNRS, MINES Paris, Aug 2023-Dec 2024                      #
 # Licence: BSD 3-Clause                                                     #
 #                                                                           #
 # Code constructed using GPT4 with CoderPad plugin and Copilot in VSCode    #
@@ -20,21 +20,19 @@
 import tkinter as tk
 from tkinter import Button, Canvas, Label, filedialog
 from PIL import Image, ImageTk
-import os, sys
+import os
 import tempfile
-from sem2surface import constructSurface
+from sem2surface import constructSurface, get_pixel_width, log
+import datetime
 
 # Main settings (FIXME to be incorporated into GUI)
-Plot_images_decomposition = True
-GaussFilter = False
-sigma = 1.
-ReconstructionMode = "FFT" # "FFT" or "DirectIntegration"  # FIXME bring it to the GUI
+# Plot_images_decomposition = True
+
 
 def header():
     # printed when running the code
     print("************************************************")
     print("*      SEM/BSE 3D surface reconstruction       *")
-    print("* V.A. Yastrebov, CNRS, MINES Paris, Aug, 2023 *")
     print("************************************************")
 
 class SEMto3Dinterface:
@@ -65,21 +63,110 @@ class SEMto3Dinterface:
         self.exit_button.pack(pady=10)
 
 
+        # Add a frame for output format selection
+        self.format_frame = tk.LabelFrame(self.left_frame, text="Output Format", padx=5, pady=5)
+        self.format_frame.pack(pady=10, fill="x")
+
+        # Variable to store the selected format
+        self.output_format = tk.StringVar(value="CSV")  # Default value
+
+        
+
+        # Radio buttons for format selection
+        formats = [("CSV", "CSV"), ("NPZ", "NPZ"), ("VTK", "VTK")]
+        for text, value in formats:
+            tk.Radiobutton(self.format_frame, 
+                          text=text, 
+                          variable=self.output_format, 
+                          value=value).pack(anchor=tk.W)
+
         # Create a list to store the canvases for each detector
         self.detector_canvases = []
         self.filename_labels = []
         self.image_references = []
 
-        # Create frames for each detector
-        for i in range(5):
-            frame = tk.Frame(self.root, relief=tk.SOLID, borderwidth=2)
-            frame.grid(row=0, column=i+1, padx=10, pady=10, sticky=tk.W+tk.E+tk.N+tk.S)
+        # Add a frame for FFT cutoff slider
+        self.cutoff_frame = tk.LabelFrame(self.left_frame, text="FFT Cutoff", padx=5, pady=5)
+        self.cutoff_frame.pack(pady=10, fill="x")
 
-            frame.config(width=50, height=50)
-            # Configure the frame for expansion
-            frame.grid_rowconfigure(0, weight=1)
-            frame.grid_rowconfigure(1, weight=1)
-            frame.grid_columnconfigure(0, weight=1)
+        # Add a slider for FFT cutoff percentage
+        self.cutoff_slider = tk.Scale(self.cutoff_frame, from_=0, to=100, orient=tk.HORIZONTAL, label="Cutoff (%)")
+        self.cutoff_slider.pack(fill="x")
+
+        # Add a frame for pixel size input
+        self.pixel_size_frame = tk.LabelFrame(self.left_frame, text="Pixel Size (micrometer)", padx=5, pady=5)
+        self.pixel_size_frame.pack(pady=10, fill="x")
+
+        # Add a checkbox for using pixel size from TIFF
+        self.use_tiff_pixel_size = tk.BooleanVar(value=True)
+        self.tiff_checkbox = tk.Checkbutton(self.pixel_size_frame, text="From TIFF", variable=self.use_tiff_pixel_size, command=self.toggle_pixel_size_entry)
+        self.tiff_checkbox.pack(anchor=tk.W)
+
+        # Add an entry for manual pixel size input
+        self.pixel_size_entry = tk.Entry(self.pixel_size_frame, state=tk.DISABLED)
+        self.pixel_size_entry.pack(fill="x")
+
+        # Add a frame for Reconstruction Mode selection
+        self.reconstruction_mode_frame = tk.LabelFrame(self.left_frame, text="Reconstruction Mode", padx=5, pady=5)
+        self.reconstruction_mode_frame.pack(pady=10, fill="x")
+
+        # Variable to store the selected reconstruction mode
+        self.reconstruction_mode = tk.StringVar(value="FFT")  # Default value
+
+        # Radio buttons for reconstruction mode selection
+        modes = [("FFT", "FFT"), ("Direct Integration", "DirectIntegration")]
+        for text, value in modes:
+            tk.Radiobutton(self.reconstruction_mode_frame, 
+                           text=text, 
+                           variable=self.reconstruction_mode, 
+                           value=value).pack(anchor=tk.W)
+
+        # Add a frame for Gauss filter
+        self.gauss_filter_frame = tk.LabelFrame(self.left_frame, text="Gauss Filter", padx=5, pady=5)
+        self.gauss_filter_frame.pack(pady=10, fill="x")
+
+        # Add a checkbox for Gauss filter
+        self.gauss_filter_enabled = tk.BooleanVar(value=False)
+        self.gauss_filter_checkbox = tk.Checkbutton(self.gauss_filter_frame, text="Enable Gauss Filter", variable=self.gauss_filter_enabled, command=self.toggle_gauss_filter_entry)
+        self.gauss_filter_checkbox.pack(anchor=tk.W)
+
+        # Add an entry for Gauss filter value
+        self.gauss_filter_value = tk.DoubleVar(value=1.)
+        self.gauss_filter_entry = tk.Entry(self.gauss_filter_frame, textvariable=self.gauss_filter_value, state=tk.DISABLED)
+        self.gauss_filter_entry.pack(fill="x")
+
+        # Add a frame for Remove Curvature option
+        self.curvature_frame = tk.LabelFrame(self.left_frame, text="Options", padx=5, pady=5)
+        self.curvature_frame.pack(pady=10, fill="x")
+
+        # Add checkbox to add time stamp to the output file name
+        self.timestamp_enabled = tk.BooleanVar(value=False)
+        self.timestamp_checkbox = tk.Checkbutton(self.curvature_frame, text="Add Time Stamp", variable=self.timestamp_enabled)
+        self.timestamp_checkbox.pack(anchor=tk.W)
+
+        # Add a checkbox for Remove Curvature
+        self.remove_curvature = tk.BooleanVar(value=True)
+        self.curvature_checkbox = tk.Checkbutton(self.curvature_frame, text="Remove Curvature", variable=self.remove_curvature)
+        self.curvature_checkbox.pack(anchor=tk.W)
+
+        # Add a checkbox for "Save images"
+        self.save_images = tk.BooleanVar(value=True)
+        self.save_images_checkbox = tk.Checkbutton(self.curvature_frame, text="Save images", variable=self.save_images)
+        self.save_images_checkbox.pack(anchor=tk.W)
+
+        # Create frames for each detector
+        detector_frame = tk.Frame(self.root, width=200)  # Set fixed width
+        detector_frame.grid(row=0, column=1, rowspan=5, padx=10, pady=10, sticky=tk.W+tk.E+tk.N+tk.S)    
+        detector_frame.grid_propagate(False)  # Prevent frame from resizing
+
+        # Configure column weights with absolute sizing
+        self.root.grid_columnconfigure(0, weight=0)  # First column (parameters) fixed width
+        self.root.grid_columnconfigure(1, weight=0, minsize=200)  # Detector column with minimum width
+        self.root.grid_columnconfigure(2, weight=1)  # Result column gets expanding space        
+
+        for i in range(5):
+            frame = tk.Frame(detector_frame, relief=tk.SOLID, borderwidth=2)
+            frame.pack(pady=5, fill=tk.X)
 
             # Add header label
             header = tk.Label(frame, text=f"Detector {i+1}", font="Helvetica 12 bold")
@@ -90,129 +177,40 @@ class SEMto3Dinterface:
             canvas.pack(pady=5)
             self.detector_canvases.append(canvas)
 
-            filename_label = tk.Label(frame, text="", wraplength=90)  # wraplength wraps the text if it's too long
+            filename_label = tk.Label(frame, text="", wraplength=150)
             filename_label.pack(pady=5)
             self.filename_labels.append(filename_label)
 
-        # Configure column weights
-        for i in range(6):  # 5 detector frames + 1 left frame
-            self.root.grid_columnconfigure(i, weight=1)
-            self.root.grid_rowconfigure(i, weight=1)
+            self.canvas = Canvas(root)
+            self.canvas.grid(row=0, column=2, rowspan=5, sticky=tk.W+tk.E+tk.N+tk.S, padx=10, pady=10)
+        # Create a frame for the result canvas with fixed 500px width
+        self.result_frame = tk.Frame(self.root, width=500, height=400, relief=tk.SOLID, borderwidth=2)
+        self.result_frame.grid(row=0, column=2, rowspan=5, sticky=tk.W+tk.E+tk.N+tk.S, padx=10, pady=10)
+        self.result_frame.grid_propagate(False)  # Prevent frame from resizing
+        self.result_frame.pack_propagate(False)  # Prevent frame from resizing
 
-        self.canvas = Canvas(root)
-        self.canvas.grid(row=1, column=0, columnspan=6, sticky=tk.W+tk.E+tk.N+tk.S)
-
-        # Create a frame for the result canvas
-        self.result_frame = tk.Frame(self.root, relief=tk.SOLID, borderwidth=2)
-        self.result_frame.grid(row=1, column=0, columnspan=6, sticky=tk.W+tk.E+tk.N+tk.S, padx=10, pady=10)
-
-        # Configure the result frame to expand and fill available space
-        self.result_frame.grid_rowconfigure(0, weight=1)
-        self.result_frame.grid_columnconfigure(0, weight=1)
+        # Add header
+        header = tk.Label(self.result_frame, text="Reconstruction", font="Helvetica 12 bold")
+        header.pack(pady=5)
 
         # Create the result canvas within the result frame
-        self.result_canvas = tk.Canvas(self.result_frame)
-        self.result_canvas.grid(row=0, column=0, sticky=tk.W+tk.E+tk.N+tk.S)  # Use grid to manage the canvas
+        self.result_canvas = tk.Canvas(self.result_frame, width=500, height=350)
+        self.result_canvas.pack(expand=True, fill=tk.BOTH, padx=5, pady=5)
 
         self.root.bind('<Configure>', self.on_resize)
         self.after_id = None
 
         # Configure column weights
-        for i in range(6):  # 5 detector frames + 1 left frame
-            self.root.grid_columnconfigure(i, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)  # Detector column
+        self.root.grid_columnconfigure(1, weight=2)  # Result column gets more space
 
         # Configure row weights
-        self.root.grid_rowconfigure(0, weight=0)  # For the detector frames and left frame
-        self.root.grid_rowconfigure(1, weight=1)  # For the result canvas
+        for i in range(5):
+            self.root.grid_rowconfigure(i, weight=1)
+        self.root.grid_rowconfigure(5, weight=0)  # Result row
 
-        
-
-    # def __init__(self, root):
-    #     self.root = root
-    #     self.root.title("SEM-BEM 3D surface reconstruction")
-    #     self.filepaths = []
-
-    #     # Create a frame to group the logo and buttons
-    #     self.left_frame = tk.Frame(root)
-    #     # self.left_frame.grid(row=0, column=0, padx=10, sticky=tk.N)
-    #     self.left_frame.grid(row=0, column=0, padx=10, sticky=tk.N+tk.W+tk.E)
-
-
-    #     # Load and display the logo inside the frame
-    #     self.logo_image = ImageTk.PhotoImage(Image.open("logo.png"))
-    #     self.logo_label = tk.Label(self.left_frame, image=self.logo_image)
-    #     self.logo_label.pack(pady=10)
-
-    #     # Buttons inside the frame
-    #     self.upload_button = Button(self.left_frame, text="Upload Files", command=self.upload_files)
-    #     self.upload_button.pack(pady=10)
-
-    #     self.run_button = Button(self.left_frame, text="Run 3D constr.", command=self.run, state=tk.DISABLED)  # Initially set to DISABLED
-    #     self.run_button.pack(pady=10)
-
-    #     # Create a list to store the canvases for each detector
-    #     self.detector_canvases = []
-    #     self.filename_labels = []
-    #     self.image_references = []
-
-    #     # Create frames for each detector
-    #     for i in range(5):
-    #         frame = tk.Frame(self.root, relief=tk.SOLID, borderwidth=2)
-    #         frame.grid(row=0, column=i+1, padx=10, pady=10, sticky=tk.W+tk.E+tk.N+tk.S)
-
-    #         frame.config(width=50, height=50)
-    #         # Configure the frame for expansion
-    #         frame.grid_rowconfigure(0, weight=1)  # For the header label
-    #         frame.grid_rowconfigure(1, weight=1)  # For the canvas
-    #         frame.grid_columnconfigure(0, weight=1)
-            
-    #         # Add header label
-    #         header = tk.Label(frame, text=f"Detector {i+1}", font="Helvetica 12 bold")
-    #         header.pack(pady=5)
-            
-    #         # Create a canvas for the image and add to the frame
-    #         canvas = tk.Canvas(frame, width=150, height=100, relief=tk.SUNKEN, borderwidth=1)
-    #         canvas.pack(pady=5)
-    #         self.detector_canvases.append(canvas)
-
-    #         filename_label = tk.Label(frame, text="", wraplength=90)  # wraplength wraps the text if it's too long
-    #         filename_label.pack(pady=5)
-    #         self.filename_labels.append(filename_label)
-
-    #     # Configure column weights
-    #     for i in range(6):  # 5 detector frames + 1 left frame
-    #         self.root.grid_columnconfigure(i, weight=1)
-    #         self.root.grid_rowconfigure(i, weight=1)
-
-    #     self.canvas = Canvas(root)
-    #     self.canvas.grid(row=1, column=0, columnspan=6, sticky=tk.W+tk.E+tk.N+tk.S)
-
-    #     # Create a frame for the result canvas
-    #     self.result_frame = tk.Frame(self.root, relief=tk.SOLID, borderwidth=2)
-    #     self.result_frame.grid(row=1, column=0, columnspan=6, sticky=tk.W+tk.E+tk.N+tk.S, padx=10, pady=10)
-
-    #     # Configure the result frame to expand and fill available space
-    #     self.result_frame.grid_rowconfigure(0, weight=1)
-    #     self.result_frame.grid_columnconfigure(0, weight=1)
-
-    #     # Create the result canvas within the result frame
-    #     self.result_canvas = tk.Canvas(self.result_frame)
-    #     self.result_canvas.grid(row=0, column=0, sticky=tk.W+tk.E+tk.N+tk.S)  # Use grid to manage the canvas
-
-
-    #     # self.result_canvas = tk.Canvas(self.root)
-    #     # self.result_canvas.grid(row=1, column=0, columnspan=6, sticky=tk.W+tk.E+tk.N+tk.S, padx=10, pady=10)
-
-    #     self.root.bind('<Configure>', self.on_resize)
-    #     self.after_id = None
-
-    #     # Configure column weights
-    #     for i in range(6):  # 5 detector frames + 1 left frame
-    #         self.root.grid_columnconfigure(i, weight=1)
-
-    #     # Configure row weights
-    #     self.root.grid_rowconfigure(0, weight=0)  # For the detector frames and left frame
-    #     self.root.grid_rowconfigure(1, weight=1)  # For the result canvas
+    
+    
     def exit_application(self):
         self.root.destroy()
         self.root.after(10, self.root.quit)
@@ -399,10 +397,58 @@ class SEMto3Dinterface:
         self.result_canvas.create_image((canvas_width - target_width) // 2, (canvas_height - target_height) // 2, anchor=tk.NW, image=photo)
         self.result_canvas.image = photo  # Keep a reference to avoid garbage collection
 
+    def toggle_pixel_size_entry(self):
+        # Enable or disable the pixel size entry based on the checkbox
+        if self.use_tiff_pixel_size.get():
+            self.pixel_size_entry.config(state=tk.DISABLED)
+        else:
+            self.pixel_size_entry.config(state=tk.NORMAL)
+
+    def toggle_gauss_filter_entry(self):
+        # Enable or disable the Gauss filter entry based on the checkbox
+        if self.gauss_filter_enabled.get():
+            self.gauss_filter_entry.config(state=tk.NORMAL)
+        else:
+            self.gauss_filter_entry.config(state=tk.DISABLED)
 
     def run(self):
         imgNames = list(self.original_filepaths)
-        imgName = constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, ReconstructionMode)
+        # Get the cutoff percentage from the slider
+        cutoff_percentage = self.cutoff_slider.get()
+
+        # Determine the value of Plot_images_decomposition based on the checkbox
+        Plot_images_decomposition = self.save_images.get()
+
+        # If time stamp is enabled, create a log file
+        if self.timestamp_enabled.get():
+            timeStamp = "_"+datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        else:
+            timeStamp = ""
+        logFileName = "log" + timeStamp + ".log"
+        logFile = open(logFileName, "w")        
+
+        if self.use_tiff_pixel_size.get():
+            pixelsize = get_pixel_width(imgNames[0])
+            log(logFile,"Read from TIF file, PixelWidth = " + str(pixelsize)+ " (m)")
+        else:
+            pixelsize = float(self.pixel_size_entry.get()) * 1e-6  # Convert micrometers to meters
+            log(logFile,"PixelWidth = " + str(pixelsize)+ " (m)")
+
+        # Get the Gauss filter settings
+        gauss_filter = self.gauss_filter_enabled.get()
+        gauss_sigma = self.gauss_filter_value.get() if gauss_filter else 0
+
+        imgName = constructSurface(imgNames, 
+                                   Plot_images_decomposition, 
+                                   gauss_filter,  # Use the Gauss filter setting
+                                   gauss_sigma,   # Use the Gauss filter value
+                                   self.reconstruction_mode.get(),  # Use the selected reconstruction mode
+                                   self.remove_curvature.get(),  # Use the Remove Curvature setting
+                                   cutoff_frequency=0.01*cutoff_percentage,
+                                   save_file_type=self.output_format.get(),
+                                   time_stamp=self.timestamp_enabled.get(),
+                                   pixelsize=pixelsize, # put pixelsize in meters
+                                   logFile=logFile)
         self.display_reconstruction(imgName)
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@
 # and Frankot-Chellappa FFT-based reconstruction technique or               #
 # direct integration from dz/dx and dz/dy gradients                         #
 #                                                                           #
-# V.A. Yastrebov, CNRS, MINES Paris, Aug, 2023                              #
+# V.A. Yastrebov, CNRS, MINES Paris, Aug 2023-Dec 2024                      #
 # Licence: BSD 3-Clause                                                     #
 #                                                                           #
 # Code constructed using GPT4 with CoderPad plugin and Copilot in VSCode    #
@@ -23,13 +23,11 @@ from skimage.transform import radon
 import matplotlib.gridspec as gridspec
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.optimize import minimize
+import vtk
 import datetime
 
-save_file_type = "CSV" # "CSV", "NPZ" or "HDF5" or "" for no saving # FIXME bring it to the GUI
-CUTOFF = 0 # Cutoff for high-frequency components in the Fourier space, 0 means no cutoff # FIXME bring it to the GUI
-pixelsize0 = 1e-6 # default value in meter
-time_stamp = True # Add time stamp to the output files # FIXME bring it to the GUI
-ZscalingFactor = 400 # Rather random z-scaling factor, normally should be extracted from known topography, e.g. indenter imprint # FIXME bring it to the GUI
+pixelsize0 = 1e-6 # default value in meter, if the user asks to search in the TIF file, but there is no PixelWidth in the TIF file
+ZscalingFactor = 1./11546.488204918922 # 400 / 3.25521e-07 # Rather random z-scaling factor, normally should be extracted from known topography, e.g. indenter imprint # FIXME bring it to the GUI
 
 # Configure Matplotlib to use LaTeX for text rendering
 plt.rcParams['font.family'] = 'serif'
@@ -37,6 +35,57 @@ plt.rcParams['font.serif'] = ['Palatino']
 plt.rcParams['text.usetex'] = True
 # Set the font to pxfonts
 plt.rcParams['text.latex.preamble'] = r'\usepackage{pxfonts}'
+
+def write_vtk(filename, X, Y, z):
+    """
+    Save {x, y, z} data as a VTK structured grid and color it by the z-values.
+
+    Args:
+        filename (str): Output file name.
+        X (numpy.ndarray): 2D array of x-coordinates.
+        Y (numpy.ndarray): 2D array of y-coordinates.
+        Z (numpy.ndarray): 2D array of z-coordinates.
+    """
+    # Ensure input arrays are numpy arrays
+    X, Y, Z = np.asarray(X), np.asarray(Y), np.asarray(z)
+
+    # Check consistency of dimensions
+    if not (X.shape == Y.shape == Z.shape):
+        raise ValueError("X, Y, and Z must have the same dimensions")
+
+    # Get dimensions
+    ny, nx = X.shape  # Note: VTK uses (nx, ny, nz) ordering
+
+    # Create points for the grid
+    points = vtk.vtkPoints()
+    for j in range(ny):
+        for i in range(nx):
+            points.InsertNextPoint(X[j, i], Y[j, i], Z[j, i])
+
+    # Create structured grid
+    grid = vtk.vtkStructuredGrid()
+    grid.SetDimensions(nx, ny, 1)  # Grid dimensions (nx, ny, nz)
+    grid.SetPoints(points)
+
+    # Add z-value as a scalar attribute for coloring
+    z_values = vtk.vtkDoubleArray()
+    z_values.SetName("Z-Value")
+    z_values.SetNumberOfComponents(1)
+    z_values.SetNumberOfTuples(nx * ny)
+
+    for j in range(ny):
+        for i in range(nx):
+            idx = j * nx + i
+            z_values.SetValue(idx, Z[j, i])
+
+    grid.GetPointData().SetScalars(z_values)
+
+    # Write to VTK file
+    writer = vtk.vtkXMLStructuredGridWriter()
+    writer.SetFileName(filename)
+    writer.SetInputData(grid)
+    writer.Write()
+
 
 # Function that outputs log information both in terminal and log file
 def log(logFile, text):
@@ -51,6 +100,33 @@ def parabolic_surface(params, X, Y):
 def objective_function(params, X, Y, Z):
     return np.sum((Z - parabolic_surface(params, X, Y))**2)
 
+def VickerIndenter(X,Y,X0,Y0,R,rot,depth,scale):
+    angle = 136 * np.pi / 180.
+    Xprime = (X-X0)*np.cos(rot) - (Y-Y0)*np.sin(rot)
+    Yprime = (X-X0)*np.sin(rot) + (Y-Y0)*np.cos(rot)
+    Z = np.zeros(X.shape)
+
+    mask = (X-X0)**2 + (Y-Y0)**2 > R**2
+
+    for i in range(X.shape[0]):
+        for j in range(X.shape[1]):
+            if Xprime[i,j] >= 0 and abs(Yprime[i,j]) < Xprime[i,j]:
+                Z[i,j] = depth + (Xprime[i,j])*np.tan(angle/2.)
+            elif Xprime[i,j] < 0 and abs(Yprime[i,j]) < abs(Xprime[i,j]):
+                Z[i,j] = depth - (Xprime[i,j])*np.tan(angle/2.)
+            elif Yprime[i,j] >= 0 and abs(Xprime[i,j]) < abs(Yprime[i,j]):
+                Z[i,j] = depth + (Yprime[i,j])*np.tan(angle/2.)
+            elif Yprime[i,j] < 0 and abs(Xprime[i,j]) < abs(Yprime[i,j]):
+                Z[i,j] = depth -(Yprime[i,j])*np.tan(angle/2.)
+            # else:
+            #     Z[i,j] = depth-(Yprime[i,j])*np.tan(angle/2.)
+            # else:
+            #     Z[i,j] = depth + R/np.sqrt(2)*np.tan(angle/2.)
+
+    Z[mask] = np.nan
+    Z *= scale
+    return Z
+
 # Extract pixel size from the tif image file (if it is there)
 def get_pixel_width(filename):
     with open(filename, 'rb') as file:
@@ -58,8 +134,6 @@ def get_pixel_width(filename):
         file.seek(-3000, 2)  # Go 200 characters before the end, adjust if needed
         # Read the last part of the file
         content = file.read().decode('ISO-8859-1')
-
-        # print(content)
         
         # Find the PixelWidth value
         pixel_width_str = "PixelWidth="
@@ -97,15 +171,13 @@ def reconstruct_surface_FFT(Gx, Gy, pixelsize, cutoff=0):
     kx = np.fft.fftshift(np.arange(0, m) - m / 2) 
     ky = np.fft.fftshift(np.arange(0, n) - n / 2)  
     Kx, Ky = np.meshgrid(kx, ky)
-
     # Cutoff high-frequency components if needed
     if cutoff > 0:    
-        a2 = (min(m,n)/cutoff)**2
-        b2 = (min(m,n)/cutoff)**2
+        cutoff_sq = (min(m,n)*cutoff/2)**2
         for i in range(m):  
             for j in range(n):
-                if i**2/a2 + j**2/b2 > 1        and (i-m)**2/a2 + j**2/b2 > 1 and \
-                (i-m)**2/a2 + (j-n)**2/b2 > 1 and i**2/a2 + (j-n)**2/b2 > 1:
+                if i**2 + j**2 > cutoff_sq and (i-m)**2 + j**2 > cutoff_sq and \
+                (i-m)**2 + (j-n)**2 > cutoff_sq and i**2 + (j-n)**2 > cutoff_sq:
                         Cx[j, i] = 0
                         Cy[j, i] = 0
 
@@ -157,28 +229,30 @@ def reconstruct_surface_direct_integration(Gx, Gy, pixelsize):
     
     return z
 
-def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, ReconstructionMode):
+def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, ReconstructionMode,RemoveCurvature=False, cutoff_frequency=0, save_file_type="", time_stamp=False, pixelsize=None, logFile=None):
         # Create a log file with time stamp        
         now = datetime.datetime.now()
         if time_stamp:
-            timeStamp = now.strftime("%Y-%m-%d_%H-%M-%S")
+            timeStamp = "_"+now.strftime("%Y-%m-%d_%H-%M-%S")
         else:
-            timeStamp = "0"
-        logFileName = "log_" + timeStamp + ".log"
-        logFile = open(logFileName, "w")
-        log(logFile,"All information is saved to " + logFileName)
+            timeStamp = ""
+        if logFile is None:
+            logFileName = "log" + timeStamp + ".log"
+            logFile = open(logFileName, "a")        
+        log(logFile,"All information is saved to " + logFile.name)
 
         # Save the names of the images to the log file
         log(logFile,"Image names:")
         for imgName in imgNames:
             log(logFile,imgName)
 
-        pixelsize = get_pixel_width(imgNames[0])
-        if pixelsize:
-            log(logFile,"Read from TIF file, PixelWidth = " + str(pixelsize)+ " (m)")
-        else:
-            log(logFile,"!!! Warning !!! PixelWidth is not found in the tif file, it is set to default value <"+str(pixelsize0)+"> (m). Need to set it manually.")
-            pixelsize = pixelsize0
+        # if pixelsize is None:
+        #     pixelsize = get_pixel_width(imgNames[0])
+        #     if pixelsize:
+        #         log(logFile,"Read from TIF file, PixelWidth = " + str(pixelsize)+ " (m)")
+        #     else:
+        #         log(logFile,"!!! Warning !!! PixelWidth is not found in the tif file, it is set to default value <"+str(pixelsize0)+"> (m). Need to set it manually.")
+        #     pixelsize = pixelsize0
         
 
         tmp = plt.imread(imgNames[0])
@@ -218,10 +292,14 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
         img1 = np.zeros(imgs[0].shape)
         img2 = np.zeros(imgs[0].shape)
         img3 = np.zeros(imgs[0].shape)
+
         for i in range(imgs.shape[0]):
             img1 += U[i,0]*imgs[i]
             img2 += U[i,1]*imgs[i]
             img3 += U[i,2]*imgs[i]
+        # To avoid eventual division by zero
+        meanImg1 = np.mean(img1)
+        img1 = np.where(img1 == 0, meanImg1, img1)
 
         if Plot_images_decomposition:
             # Plot the images: top row is original images, bottom row is polar decomposition
@@ -392,41 +470,45 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
 
         reconstruction_type = ""
         if ReconstructionMode == "FFT":
-            z = reconstruct_surface_FFT(Gx, Gy, pixelsize, cutoff=CUTOFF)
+            z = reconstruct_surface_FFT(Gx, Gy, pixelsize, cutoff=cutoff_frequency)
             reconstruction_type = "FFT"
-            z *= ZscalingFactor # Rather random z-scaling factor
+            # z *= ZscalingFactor * pixelsize # Rather random z-scaling factor
+            z *= ZscalingFactor * pixelsize / (6.51042e-08)
         elif ReconstructionMode == "DirectIntegration":
             z = reconstruct_surface_direct_integration(Gx, Gy, pixelsize)
-            z *= 1e6 # convert to micrometers
             reconstruction_type = "DirectIntegration"
         else:
             log(logFile,"Error, unknown reconstruction mode")
             logFile.close()
             return None      
 
+        z *= 1e6 # convert to micrometers
         n,m = z.shape
         X,Y = np.meshgrid(np.arange(0, m), np.arange(0, n))
 
-        # Remove curvature defect
-        initial_params = [n/5., m/5., 0]
-        initial_params = [100, 100, 0]
+        if RemoveCurvature:
+            # Remove curvature defect
+            initial_params = [n/5., m/5., 0]
+            initial_params = [100, 100, 0]
 
-        # Minimize the squared difference between z(x, y) and p(x, y)
-        result = minimize(objective_function, initial_params, args=(X, Y, z), bounds=[(0.1, None), (0.1, None), (-np.inf, np.inf)])
+            # Minimize the squared difference between z(x, y) and p(x, y)
+            result = minimize(objective_function, initial_params, args=(X, Y, z), bounds=[(0.1, None), (0.1, None), (-np.inf, np.inf)])
 
-        # Subtract the parabolic surface
-        a, b, c = result.x
-        log(logFile,"Curvature defect removal, parameters: Rx = " + str(a) + ", Ry = " + str(b))
-        P = parabolic_surface(result.x, X, Y)
-        z -= P
+            # Subtract the parabolic surface
+            a, b, c = result.x
+            log(logFile,"Curvature defect removal, parameters: Rx = " + str(a) + ", Ry = " + str(b))
+            P = parabolic_surface(result.x, X, Y)
+            z -= P
 
-        pixelsize *= 1e6  # convert to micrometers
 
         # Plot the surface        
-        fig, ax = plt.subplots()
-        img = ax.imshow(z, extent=[0, X.shape[1]*pixelsize, 0, X.shape[0]*pixelsize], interpolation="none")
-        ax.set_xlabel("$x$, $\mu$m")
-        ax.set_ylabel("$y$, $\mu$m")
+        fig, ax = plt.subplots(figsize=(8,10))
+        # img = ax.imshow(z, extent=[0, 1e6*X.shape[1]*pixelsize, 0, 1e6*X.shape[0]*pixelsize], interpolation="none")
+        # Rotate the image by 90 degrees
+        z = np.rot90(z)
+        img = ax.imshow(z, extent=[1e6*X.shape[0]*pixelsize, 0, 0, 1e6*X.shape[1]*pixelsize], interpolation="none")
+        ax.set_xlabel(r"$y$, $\mu$m")
+        ax.set_ylabel(r"$x$, $\mu$m")
         ax.set_title("Surface, optimized")
 
         # Create a new set of axes above the main axes
@@ -435,13 +517,15 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
 
         # Add the colorbar to the new set of axes
         cbar = plt.colorbar(img, cax=cax, orientation='horizontal')
-        cbar.set_label('$z$, $\mu$m')
+        cbar.set_label(r'$z$, $\mu$m')
         cax.xaxis.set_ticks_position('top')
         cax.xaxis.set_label_position('top')
 
         filename = "Surface_"+reconstruction_type+"_" + timeStamp + ".png"
         plt.tight_layout()
-        fig.savefig(filename, dpi=300)
+        # Crop figure to remove white space
+        fig.savefig(filename, dpi=300, bbox_inches='tight')
+        returnImgName = filename
         log(logFile, "Surface reconstructed using " + reconstruction_type + " is saved to " + filename)
 
         # Plot the surface again in grayscale
@@ -450,13 +534,16 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
         ax.axis('off')
         ax.set_aspect('auto')
         fig.subplots_adjust(left=0, right=1, top=1, bottom=0, wspace=0, hspace=0)
-        imgName = "SurfaceF_" + reconstruction_type + "_" + timeStamp + ".png"
-        fig.savefig(imgName, dpi=300)
+        filename = "Surface_BW_" + reconstruction_type + "_" + timeStamp + ".png"
+        fig.savefig(filename, dpi=300)
 
-        # save in ASCII file readable by gnuplot with the format # x, y, z and empty lines between each row
-        x = np.linspace(0, z.shape[0]*pixelsize, num = z.shape[1])
-        y = np.linspace(0, z.shape[1]*pixelsize, num = z.shape[0])
+
+        
+
+        x = np.linspace(0, z.shape[1]*pixelsize, num = z.shape[1])
+        y = np.linspace(0, z.shape[0]*pixelsize, num = z.shape[0])
         X, Y = np.meshgrid(x, y)
+        # save in ASCII file readable by gnuplot with the format # x, y, z and empty lines between each row (if needed)
         if save_file_type == "CSV":
             filename = "Surface_" + timeStamp + ".csv"
             log(logFile,"Surface saved to " + filename)
@@ -464,25 +551,18 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
             f.write("# x (um), y (um), z (um)\n")           
             for i in range(z.shape[0]):
                 for j in range(z.shape[1]):
-                    f.write("{0:.6f},{1:.6f},{2:.6f}\n".format(X[i,j], Y[i,j], z[i,j]))
-                f.write("\n")
+                    f.write("{0:.6f},{1:.6f},{2:.6f}\n".format(X[i,j], Y[i,j], z[i,j]))                
+                # f.write("\n") # if needed for gnuplot, uncomment
             f.close()
-        elif save_file_type == "NPZ":
         # Save as npz file
+        elif save_file_type == "NPZ":
             filename = "Surface_" + timeStamp + ".npz"
             np.savez(filename, X=X, Y=Y, Z=z)
             log(logFile,"Surface saved to " + filename)
-        elif save_file_type == "HDF5":
-        # Save as hdf5 file
-            filename = "Surface_" + timeStamp + ".hdf5"
-            import h5py
-            f = h5py.File(filename, 'w')
-            # provide information about units
-            f.attrs['units'] = 'um'
-            f.create_dataset('X', data=X)
-            f.create_dataset('Y', data=Y)
-            f.create_dataset('Z', data=z)
-            f.close()
+        # Save as vts (vtk structured grid) file
+        elif save_file_type == "VTK":
+            filename = "Surface_" + timeStamp + ".vts"
+            write_vtk(filename, X, Y, z)
             log(logFile,"Surface saved to " + filename)
         else:
             log(logFile,"Surface is not saved")
@@ -491,5 +571,5 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
         log(logFile,"Successfully finished at " + now.strftime("%Y-%m-%d %H:%M:%S") + "\n")
         logFile.close()
 
-        return imgName
+        return returnImgName
 
