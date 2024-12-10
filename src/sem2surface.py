@@ -12,7 +12,10 @@
 # V.A. Yastrebov, CNRS, MINES Paris, Aug 2023-Dec 2024                      #
 # Licence: BSD 3-Clause                                                     #
 #                                                                           #
-# Code constructed using GPT4 with CoderPad plugin and Copilot in VSCode    #
+# Aided by :                                                                #
+#  - GPT4 with CoderPad plugin                                              #
+#  - Copilot in VSCode                                                      #
+#  - Claude 3.5 Sonnet in cursor.                                           #
 #                                                                           #
 #---------------------------------------------------------------------------# 
 
@@ -99,6 +102,22 @@ def parabolic_surface(params, X, Y):
     return 0.5*(((X-x0)/a)**2 + ((Y-y0)/b)**2) + c
 def objective_function(params, X, Y, Z):
     return np.sum((Z - parabolic_surface(params, X, Y))**2)
+
+def remove_outside_central_circle(img):
+    # When done in this manner, radon sometimes issues a warning that the image should be zero outside the circle, but it anyway works correctly        
+    # Create a coordinate grid
+    modified_img = img.copy()
+    x, y = np.ogrid[:img.shape[0], :img.shape[1]]
+    radius = min(img.shape[0], img.shape[1]) // 2
+    center_x = img.shape[0] // 2
+    center_y = img.shape[1] // 2
+    # Create a mask for values outside the circle
+    mask = (x - center_x)**2 + (y - center_y)**2 > radius**2
+    # Zero out values outside the circle
+    modified_img[mask] = 0
+    # Crop the image to the central circle
+    img = img[center_x-radius:center_x+radius, center_y-radius:center_y+radius]
+    return modified_img
 
 def VickerIndenter(X,Y,X0,Y0,R,rot,depth,scale):
     angle = 136 * np.pi / 180.
@@ -229,6 +248,102 @@ def reconstruct_surface_direct_integration(Gx, Gy, pixelsize):
     
     return z
 
+def plot_radon_rms(total_angles, total_rms, filename=None):
+    plt.figure(figsize=(6, 4))
+    
+    # Find and highlight the minimum RMS angle
+    min_rms_index = np.argmin(total_rms)
+    min_angle = total_angles[min_rms_index]
+    min_angle2 = min_angle + 90
+    max_rms = np.max(total_rms)
+    total_rms = total_rms/max_rms
+
+    plt.plot(total_angles, total_rms, 'k-', label='Radon RMS')
+    plt.scatter(total_angles, total_rms, c='green', marker='o', s=20, zorder=10)
+    plt.ylim(0,1.0)
+    
+    # plt.scatter(min_angle, min_rms, c='green', s=200, marker='*', 
+    #             label=f'Minimum RMS (Angle: {min_angle:.2f}°, RMS: {min_rms:.4f})')
+    plt.axvline(x=min_angle, color="k", linestyle="--")
+    plt.text(min_angle*1.05, 0.5, "$\\theta_1$ = {0:.2f}".format(min_angle), color="k")
+    plt.axvline(x=min_angle2, color="k", linestyle="--")
+    plt.text(min_angle2*1.05, 0.1, "$\\theta_2$ = {0:.2f}".format(min_angle2), color="k")
+    plt.xlim(0,180)
+    plt.xlabel('Angle (degrees)')
+    plt.ylabel('Normalized Radon RMS Value')
+    plt.title('Radon Transform RMS vs Angle')
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.legend()
+    plt.tight_layout()
+    if filename is not None:
+        plt.savefig(filename)
+
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+
+def compute_robust_gradients(imgs):
+    """
+    Compute robust gradients using PCA-like approach with proper correlation matrix
+    
+    Parameters:
+    -----------
+    imgs : list of numpy.ndarray
+        List of input images (same shape)
+    
+    Returns:
+    --------
+    tuple: (img1,G1, G2)
+        Gradient images computed from PCA decomposition
+    """
+    # Ensure all images have the same shape
+    if len(set(img.shape for img in imgs)) > 1:
+        raise ValueError("All input images must have the same shape")
+    
+    # Reshape images into 2D matrix (each row is a flattened image)
+    img_matrix = np.array([img.flatten() for img in imgs])
+    
+    nb_images = img_matrix.shape[0]
+    
+    # Compute correlation matrix
+    CorrMatrix = np.zeros((nb_images,nb_images))
+    for i in range(nb_images):
+        for j in range(nb_images):
+            CorrMatrix[i,j] = np.dot(img_matrix[i], img_matrix[j]) / np.sqrt(np.dot(img_matrix[i], img_matrix[i]) * np.dot(img_matrix[j], img_matrix[j]))
+    
+    # Perform SVD on the correlation matrix
+    U, S, V = np.linalg.svd(CorrMatrix)
+    
+    print("U = ", U)
+    print("S = ", S)
+    print("V = ", V)
+    
+    # Reconstruct images using the first two principal components
+    img_shape = imgs[0].shape
+    img1 = np.zeros(img_shape)
+    img2 = np.zeros(img_shape)
+    img3 = np.zeros(img_shape)
+    
+    for i in range(nb_images):
+        img1 += U[i, 0] * imgs[i]
+        img2 += U[i, 1] * imgs[i]
+        img3 += U[i, 2] * imgs[i]
+    # Avoid division by zero
+    # Add a small epsilon to prevent division by zero
+    # epsilon = np.finfo(float).eps
+    meanImg1 = np.mean(img1)
+    img1 = np.where(img1 == 0, meanImg1, img1)
+    
+    # Compute gradients
+    # Normalize by the first principal component image
+    
+    G1 = img2 / (img1)
+    G2 = img3 / (img1)    
+    
+    # Optional: You might want to normalize or scale G1 and G2 further
+    
+    return img1, G1, G2
+
+
 def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, ReconstructionMode,RemoveCurvature=False, cutoff_frequency=0, save_file_type="", time_stamp=False, pixelsize=None, logFile=None):
         # Create a log file with time stamp        
         now = datetime.datetime.now()
@@ -240,19 +355,22 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
             logFileName = "log" + timeStamp + ".log"
             logFile = open(logFileName, "a")        
         log(logFile,"All information is saved to " + logFile.name)
+        log(logFile,"Parameters:")
+        log(logFile,"   / Plot intermediate images = " + str(Plot_images_decomposition))
+        log(logFile,"   / Gauss filter = " + str(GaussFilter))
+        log(logFile,"   / STD Gauss filter  = " + str(sigma))
+        log(logFile,"   / Remove curvature = " + str(RemoveCurvature))
+        log(logFile,"   / Reconstruction Mode = " + str(ReconstructionMode))
+        log(logFile,"   / FFT cutoff frequency = " + str(cutoff_frequency))
+        log(logFile,"   / Output file type = " + str(save_file_type))
+        log(logFile,"   / Time stamp = " + str(time_stamp)[1:])
+        log(logFile,"   / Pixel size = " + str(pixelsize))
 
         # Save the names of the images to the log file
-        log(logFile,"Image names:")
+        log(logFile,"Images folder:" + "/".join(imgNames[0].split("/")[:-1]))
+        log(logFile,"Images names:")
         for imgName in imgNames:
-            log(logFile,imgName)
-
-        # if pixelsize is None:
-        #     pixelsize = get_pixel_width(imgNames[0])
-        #     if pixelsize:
-        #         log(logFile,"Read from TIF file, PixelWidth = " + str(pixelsize)+ " (m)")
-        #     else:
-        #         log(logFile,"!!! Warning !!! PixelWidth is not found in the tif file, it is set to default value <"+str(pixelsize0)+"> (m). Need to set it manually.")
-        #     pixelsize = pixelsize0
+            log(logFile,"    / " + imgName.split("/")[-1])
         
 
         tmp = plt.imread(imgNames[0])
@@ -274,32 +392,41 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
         imgs[2] = np.nan_to_num(imgs[2])
 
         if GaussFilter:
+            print("Gauss filter is applied")
             # Gauss filter all gradient images
             for i in range(imgs.shape[0]):
                 for j in range(imgs.shape[1]):
                     imgs[i,j] = gaussian_filter(imgs[i,j], sigma=sigma)
 
-        # Construct correlation matrix between images imgs[0], imgs[1], and imgs[2]
-        N = len(imgs)
-        CorrMatrix = np.zeros((N,N))
-        for i in range(N):
-            for j in range(N):
-                CorrMatrix[i,j] = np.dot(imgs[i].flatten(), imgs[j].flatten())
+        # # Construct correlation matrix between images imgs[0], imgs[1], and imgs[2]
+        # N = len(imgs)
+        # CorrMatrix = np.zeros((N,N))
+        # for i in range(N):
+        #     for j in range(N):
+        #         CorrMatrix[i,j] = np.dot(imgs[i].flatten(), imgs[j].flatten())
 
-        # Do polar decomposition of the correlation matrix
-        U, S, V = np.linalg.svd(CorrMatrix)
-        
-        img1 = np.zeros(imgs[0].shape)
-        img2 = np.zeros(imgs[0].shape)
-        img3 = np.zeros(imgs[0].shape)
+        # # Do polar decomposition (or SVD) of the correlation matrix
+        # U, S, V = np.linalg.svd(CorrMatrix)
+        # print("CorrMatrix SVD = ", CorrMatrix)
+        # print("U = ", U)
+        # print("S = ", S)
+        # print("V = ", V)
+        # img1 = np.zeros(imgs[0].shape)
+        # img2 = np.zeros(imgs[0].shape)
+        # img3 = np.zeros(imgs[0].shape)
 
-        for i in range(imgs.shape[0]):
-            img1 += U[i,0]*imgs[i]
-            img2 += U[i,1]*imgs[i]
-            img3 += U[i,2]*imgs[i]
-        # To avoid eventual division by zero
-        meanImg1 = np.mean(img1)
-        img1 = np.where(img1 == 0, meanImg1, img1)
+        # for i in range(N):
+        #     img1 += U[i,0]*imgs[i]
+        #     img2 += U[i,1]*imgs[i]
+        #     img3 += U[i,2]*imgs[i]
+        # # To avoid eventual division by zero
+        # meanImg1 = np.mean(img1)
+        # img1 = np.where(img1 == 0, meanImg1, img1)
+        # # Gradient along unknown directions are given by
+        # G1 = img2/img1
+        # G2 = img3/img1        
+
+        img1, G1, G2 = compute_robust_gradients(imgs)
 
         if Plot_images_decomposition:
             # Plot the images: top row is original images, bottom row is polar decomposition
@@ -330,108 +457,118 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
             plt.title("Principal Image, $A$")
 
             plt.subplot(2,3,5)
-            plt.imshow(img2/img1)
+            plt.imshow(G1)
             plt.title("Normalized principal Image 2, $G_1$")
 
             plt.subplot(2,3,6)
-            plt.imshow(img3/img1)
+            plt.imshow(G2)
             plt.title("Normalized principal Image 3, $G_2$")
 
             plt.tight_layout()
             # Save with a unique identifier with a time tag and save in info in log file
-            filename = "Images_decomposition_" + timeStamp + ".png"
+            filename = "Images_decomposition" + timeStamp + ".png"
             fig.savefig(filename, dpi=300)
             log(logFile,"Images decomposition saved to " + filename)
 
-        # Gradient along unknown directions are given by
-        G1 = img2/img1
-        G2 = img3/img1
 
-        ##################################################################
-        # Use Radon method to find the angle of the unknown direction
-        ##################################################################
+
+# ============================================================================== #
+#   Use Radon transform to find the angle of the main gradient directions        #
+# ============================================================================== #
+        # theta = np.linspace(0., 180., 180, endpoint=False)
+        # G1c = np.zeros(G1.shape)
+        # xc = G1.shape[0]/2
+        # yc = G1.shape[1]/2
+        # rad = min(G1.shape[0],G1.shape[1])/2
+        # for i in range(G1.shape[0]):
+        #     for j in range(G1.shape[1]):
+        #         if (i - xc)**2 + (j - yc)**2 < rad**2:
+        #             G1c[i,j] = G1[i,j]
+        # R1 = radon(G1c, theta=theta, circle=True)
+        # R1t = np.sum((R1 - np.mean(R1, axis=0))**2, axis=0)
+        # theta1 = theta[np.argmin(R1t)]
+        # theta2 = theta1 + 90
+
         # Construct the Radon transform of the gradient images
-        # To accelerate do it for G1 only
-        theta = np.linspace(0., 180., 180, endpoint=False)
-        # Put all G1c and G2c values zero outside the circle
-
-        # minDim = min(G1.shape[0], G1.shape[1])
-        # if minDim % 2 == 1:
-        #     minDim -= 1
-        # G1c = np.array([])
-        # if G1.shape[0] > G1.shape[1]:
-        #     startWith = int((G1.shape[0]-minDim)/2)
-        #     G1c = G1[startWith:startWith+minDim,0:minDim]
-        # else:
-        #     startWith = int((G1.shape[1]-minDim)/2)
-        #     G1c = G1[0:minDim,startWith:startWith+minDim]
-        # # Create a coordinate grid
-        # x, y = np.ogrid[:minDim, :minDim]
-        # center = minDim // 2
-        # # Create a mask for values outside the circle
-        # mask = (x - center)**2 + (y - center)**2 > (minDim/2)**2
-        # # Zero out values outside the circle
-        # G1c[mask] = 0
-
-
-        # When done in this manner, radon sometimes issues a warning that the image should be zero outside the circle, but it anyway works correctly        
-        G1c = np.zeros(G1.shape)
-        # G2c = np.zeros(G2.shape)
-        xc = G1.shape[0]/2
-        yc = G1.shape[1]/2
-        rad = min(G1.shape[0],G1.shape[1])/2
-        for i in range(G1.shape[0]):
-            for j in range(G1.shape[1]):
-                if (i - xc)**2 + (j - yc)**2 < rad**2:
-                    G1c[i,j] = G1[i,j]
-                    # G2c[i,j] = G2[i,j]
-
-
-        R1 = radon(G1c, theta=theta, circle=True)
-        # R2 = radon(G2c, theta=theta, circle=True)
-
-        # Find the angle of the unknown direction
-        fig,ax = plt.subplots()
-        plt.xlim([0, 180])
-        plt.xlabel("Projection angle (deg)")
-        plt.ylabel("RMS of Radon transform")
-
-        R1t = np.sum((R1 - np.mean(R1, axis=0))**2, axis=0)
-        # R2t = np.sum((R2 - np.mean(R2, axis=0))**2, axis=0)
-
-        # plt.ylim([0, 1.05*max(np.max(R1t),np.max(R2t))])
-        plt.ylim([0, 1.05*np.max(R1t)])
-
-        plt.plot(theta, R1t, label="R1")
-        # plt.plot(theta, R2t, label="R2")
-        plt.axhline(y=0, color="k", linestyle="--")
-        plt.legend(loc="best")
+        # To accelerate do it in an iterative manner and for G1 only
+        n_dissection = 10
+        angle_start = 0
+        angle_end = 180
+        iteration = 0
+        max_iteration = 4
         
-        # Angles corresponding to zero R1t and R2t
-        theta1 = theta[np.argmin(R1t)]
-        # theta2 = theta[np.argmin(R2t)]
-        # if theta2 - theta1 > 0:
-        #     ninty = 90
-        # else:
-        #     ninty = -90
-        # theta2_ = theta1 + ninty
-        # theta1_ = theta2 - ninty
-        # theta1 = (theta1 + theta1_)/2.
-        # theta2 = (theta2 + theta2_)/2.
-        theta2 = theta1 + 90
+        # Arrays to store all angles and RMS values across iterations
+        total_angles = []
+        total_rms = []
+        
+        # Arrays for final values to plot
+        Radon_rms = np.zeros(max_iteration*n_dissection)
+        Radon_angles = np.zeros(max_iteration*n_dissection)
+        
+        while True:
+            log(logFile,"   / Radon search: iteration " + str(iteration) + " angle_start = " + str(angle_start) + " angle_end = " + str(angle_end))
+            theta = np.linspace(angle_start, angle_end, n_dissection, endpoint=False)
+            # Radon_angles[iteration*n_dissection:(iteration+1)*n_dissection] = theta
+            
+            # Put all G1c values zero outside the circle
+            G1c = remove_outside_central_circle(G1)
+            
+            # Compute the Radon transform
+            R1 = radon(G1c, theta=theta, circle=True)
+            
+            # Find the RMS of the angles
+            R1t = np.sum((R1 - np.mean(R1, axis=0))**2, axis=0)
+            # Radon_rms[iteration*n_dissection:(iteration+1)*n_dissection] = R1t
+            
+            # Store all angles and RMS values for this iteration
+            total_angles.extend(theta)
+            total_rms.extend(R1t)
+            
+            # Find the angle with the minimum RMS
+            theta1 = theta[np.argmin(R1t)]
+            angle_start = theta1 - 2*(angle_end - angle_start)/n_dissection
+            angle_end = theta1 + 2*(angle_end - angle_start)/n_dissection
+            iteration += 1
+            if iteration > max_iteration:
+                break
+                
+        # Convert lists to numpy arrays and order angles in ascending order
+        total_angles = np.array(total_angles)
+        total_rms = np.array(total_rms)
+        sorted_indices = np.argsort(total_angles)
+        total_angles = total_angles[sorted_indices]
+        total_rms = total_rms[sorted_indices]
 
+        theta2 = theta1 + 90
+        if theta2 > 180:
+            theta2 = theta2 - 180
         # Save theta angles in log file
         log(logFile,"theta1 = " + str(theta1))
         log(logFile,"theta2 = " + str(theta2))
 
-        plt.axvline(x=theta1, color="r", linestyle="--")
-        plt.text(theta1*0.95, 0.4e6, "$\\theta_1$ = {0:.1f}".format(theta1), color="r")
-        plt.axvline(x=theta2, color="b", linestyle="--")
-        plt.text(theta2*0.95, 0.4e6, "$\\theta_2$ = {0:.1f}".format(theta2), color="b")
-        # Save with a unique identifier with a time tag and save in info in log file
-        filename = "RadonTransformRMS_" + timeStamp + ".pdf"
-        fig.savefig(filename)
-        log(logFile,"Radon transform RMS saved to " + filename)
+        if Plot_images_decomposition:
+            filename = "RadonTransformRMS" + timeStamp + ".pdf"
+            plot_radon_rms(total_angles, total_rms, filename=filename)
+            log(logFile,"Radon transform RMS saved to " + filename)
+        #     fig,ax = plt.subplots()
+        #     plt.xlim([0, 180])
+        #     plt.xlabel("Projection angle (deg)")
+        #     plt.ylabel("RMS of Radon transform")
+        #     # plt.ylim([0, 1.05*max(np.max(R1t),np.max(R2t))])
+        #     # plt.ylim([0, 1.05*np.max(R1t)])
+
+        #     # plt.plot(theta, R1t, label="R1")
+        #     plt.plot(Radon_angles, Radon_rms, label="R1")
+        #     # plt.plot(theta, R2t, label="R2")
+        #     plt.axhline(y=0, color="k", linestyle="--")
+        #     plt.legend(loc="best")
+        #     plt.axvline(x=theta1, color="r", linestyle="--")
+        #     plt.text(theta1*0.95, 0.4e6, "$\\theta_1$ = {0:.1f}".format(theta1), color="r")
+        #     plt.axvline(x=theta2, color="b", linestyle="--")
+        #     plt.text(theta2*0.95, 0.4e6, "$\\theta_2$ = {0:.1f}".format(theta2), color="b")
+        #     # Save with a unique identifier with a time tag and save in info in log file
+        #     filename = "RadonTransformRMS" + timeStamp + ".pdf"
+        #     fig.savefig(filename)
 
         # Compute gradients along x and y directions
         Gx = np.cos(theta1*np.pi/180.)*G1 + np.cos(theta2*np.pi/180.)*G2
@@ -464,7 +601,7 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
             plt.tight_layout()
 
             # Save with a unique identifier with a time tag and save in info in log file
-            filename = "Gradients_" + timeStamp + ".png"
+            filename = "Gradients" + timeStamp + ".png"
             fig.savefig(filename, dpi=300)
             log(logFile,"Gradients along x and y directions are saved to " + filename)
 
@@ -487,65 +624,74 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
         X,Y = np.meshgrid(np.arange(0, m), np.arange(0, n))
 
         if RemoveCurvature:
-            # Remove curvature defect
-            initial_params = [n/5., m/5., 0]
-            initial_params = [100, 100, 0]
+            # Remove curvature defect by trying both positive and negative curvatures
+            initial_params_pos = [n/5., m/5., 0]
+            initial_params_neg = [-n/5., -m/5., 0]
 
-            # Minimize the squared difference between z(x, y) and p(x, y)
-            result = minimize(objective_function, initial_params, args=(X, Y, z), bounds=[(0.1, None), (0.1, None), (-np.inf, np.inf)])
+            # Try fitting with positive curvature
+            result_pos = minimize(objective_function, initial_params_pos, args=(X, Y, z), bounds=[(0.1, None), (0.1, None), (-np.inf, np.inf)])
+            error_pos = objective_function(result_pos.x, X, Y, z)
+
+            # Try fitting with negative curvature 
+            result_neg = minimize(objective_function, initial_params_neg, args=(X, Y, z), bounds=[(-np.inf, -0.1), (-np.inf, -0.1), (-np.inf, np.inf)])
+            error_neg = objective_function(result_neg.x, X, Y, z)
+
+            # Use the fit with smaller error
+            if error_pos < error_neg:
+                result = result_pos
+                curvature_type = "positive"
+            else:
+                result = result_neg
+                curvature_type = "negative"
 
             # Subtract the parabolic surface
             a, b, c = result.x
-            log(logFile,"Curvature defect removal, parameters: Rx = " + str(a) + ", Ry = " + str(b))
+            log(logFile,f"Curvature defect removal ({curvature_type} curvature), parameters: Rx = {a:.2f} um, Ry = {b:.2f} um")
             P = parabolic_surface(result.x, X, Y)
             z -= P
 
+#========================================================= #
+#            Plot the reconstructed surface                #
+#========================================================= #
 
-        # Plot the surface        
         fig, ax = plt.subplots(figsize=(8,10))
-        # img = ax.imshow(z, extent=[0, 1e6*X.shape[1]*pixelsize, 0, 1e6*X.shape[0]*pixelsize], interpolation="none")
-        # Rotate the image by 90 degrees
         z = np.rot90(z)
         img = ax.imshow(z, extent=[1e6*X.shape[0]*pixelsize, 0, 0, 1e6*X.shape[1]*pixelsize], interpolation="none")
         ax.set_xlabel(r"$y$, $\mu$m")
         ax.set_ylabel(r"$x$, $\mu$m")
-        ax.set_title("Surface, optimized")
-
-        # Create a new set of axes above the main axes
+        ax.set_title("Reconstructed surface")
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("top", size="5%", pad=0.5)
-
-        # Add the colorbar to the new set of axes
         cbar = plt.colorbar(img, cax=cax, orientation='horizontal')
         cbar.set_label(r'$z$, $\mu$m')
         cax.xaxis.set_ticks_position('top')
         cax.xaxis.set_label_position('top')
 
-        filename = "Surface_"+reconstruction_type+"_" + timeStamp + ".png"
+        filename = "Surface_"+reconstruction_type + timeStamp + ".png"
         plt.tight_layout()
-        # Crop figure to remove white space
         fig.savefig(filename, dpi=300, bbox_inches='tight')
         returnImgName = filename
         log(logFile, "Surface reconstructed using " + reconstruction_type + " is saved to " + filename)
 
-        # Plot the surface again in grayscale
-        fig,ax = plt.subplots()
+        # Plot the surface again in the original orientation in grayscale, keeping aspect ratio
+        fig,ax = plt.subplots(figsize=(8,8*X.shape[1]/X.shape[0]))
         ax.imshow(z, cmap='gray')
         ax.axis('off')
         ax.set_aspect('auto')
         fig.subplots_adjust(left=0, right=1, top=1, bottom=0, wspace=0, hspace=0)
-        filename = "Surface_BW_" + reconstruction_type + "_" + timeStamp + ".png"
+        filename = "Surface_BW_" + reconstruction_type + timeStamp + ".png"
         fig.savefig(filename, dpi=300)
 
+#========================================================= #
+#     Save reconstructed surface in different formats      #
+#========================================================= #
 
-        
-
-        x = np.linspace(0, z.shape[1]*pixelsize, num = z.shape[1])
-        y = np.linspace(0, z.shape[0]*pixelsize, num = z.shape[0])
+        x = np.linspace(0, z.shape[1]*pixelsize*1e6, num = z.shape[1])
+        y = np.linspace(0, z.shape[0]*pixelsize*1e6, num = z.shape[0])
         X, Y = np.meshgrid(x, y)
         # save in ASCII file readable by gnuplot with the format # x, y, z and empty lines between each row (if needed)
         if save_file_type == "CSV":
-            filename = "Surface_" + timeStamp + ".csv"
+            filename = "Surface" + timeStamp + ".csv"
             log(logFile,"Surface saved to " + filename)
             f = open(filename, "w")
             f.write("# x (um), y (um), z (um)\n")           
@@ -556,12 +702,12 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
             f.close()
         # Save as npz file
         elif save_file_type == "NPZ":
-            filename = "Surface_" + timeStamp + ".npz"
+            filename = "Surface" + timeStamp + ".npz"
             np.savez(filename, X=X, Y=Y, Z=z)
             log(logFile,"Surface saved to " + filename)
         # Save as vts (vtk structured grid) file
         elif save_file_type == "VTK":
-            filename = "Surface_" + timeStamp + ".vts"
+            filename = "Surface" + timeStamp + ".vts"
             write_vtk(filename, X, Y, z)
             log(logFile,"Surface saved to " + filename)
         else:

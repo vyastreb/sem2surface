@@ -12,9 +12,14 @@
 # V.A. Yastrebov, CNRS, MINES Paris, Aug 2023-Dec 2024                      #
 # Licence: BSD 3-Clause                                                     #
 #                                                                           #
-# Code constructed using GPT4 with CoderPad plugin and Copilot in VSCode    #
+# Aided by :                                                                #
+#  - GPT4 with CoderPad plugin                                              #
+#  - Copilot in VSCode                                                      #
+#  - Claude 3.5 Sonnet in cursor.                                           #
 #                                                                           #
 #---------------------------------------------------------------------------#
+
+#TODO: add scaling factor to the GUI
 
 # For GUI
 import tkinter as tk
@@ -68,12 +73,12 @@ class SEMto3Dinterface:
         self.format_frame.pack(pady=10, fill="x")
 
         # Variable to store the selected format
-        self.output_format = tk.StringVar(value="CSV")  # Default value
+        self.output_format = tk.StringVar(value="do not save")  # Default value
 
         
 
         # Radio buttons for format selection
-        formats = [("CSV", "CSV"), ("NPZ", "NPZ"), ("VTK", "VTK")]
+        formats = [("CSV", "CSV"), ("NPZ", "NPZ"), ("VTK", "VTK"), ("do not save", "do not save")]
         for text, value in formats:
             tk.Radiobutton(self.format_frame, 
                           text=text, 
@@ -150,8 +155,8 @@ class SEMto3Dinterface:
         self.curvature_checkbox.pack(anchor=tk.W)
 
         # Add a checkbox for "Save images"
-        self.save_images = tk.BooleanVar(value=True)
-        self.save_images_checkbox = tk.Checkbutton(self.curvature_frame, text="Save images", variable=self.save_images)
+        self.save_images = tk.BooleanVar(value=False)
+        self.save_images_checkbox = tk.Checkbutton(self.curvature_frame, text="Save extra images", variable=self.save_images)
         self.save_images_checkbox.pack(anchor=tk.W)
 
         # Create frames for each detector
@@ -425,14 +430,14 @@ class SEMto3Dinterface:
         else:
             timeStamp = ""
         logFileName = "log" + timeStamp + ".log"
-        logFile = open(logFileName, "w")        
+        logFile = open(logFileName, "a")        
 
         if self.use_tiff_pixel_size.get():
             pixelsize = get_pixel_width(imgNames[0])
-            log(logFile,"Read from TIF file, PixelWidth = " + str(pixelsize)+ " (m)")
+            log(logFile,"Read from TIF file, Pixel size = " + str(pixelsize)+ " (m)")
         else:
             pixelsize = float(self.pixel_size_entry.get()) * 1e-6  # Convert micrometers to meters
-            log(logFile,"PixelWidth = " + str(pixelsize)+ " (m)")
+            log(logFile,"Pixel size = " + str(pixelsize)+ " (m)")
 
         # Get the Gauss filter settings
         gauss_filter = self.gauss_filter_enabled.get()
