@@ -32,7 +32,7 @@ Below we list the main steps of the method:
 4. The first three columns of the matrix $U$ are used to construct the intensity image and two components of the gradient (along unknown principal directions) as follows (see [@fig:decomposition]):
 
     + Intensity: $A = \sum_i U_{i1} I_i$.
-    + Gradient 1: $G_1 = \sum_i  U_{i2} I_i / A$
+    + Gradient 1: $G_1 = \sum_i  U_{i2} I_i / A$    
     + Gradient 2: $G_2 = \sum_i U_{i3} I_i / A$
 
 ![Original images $I_1,I_2,I_3$ obtained with three detectors and their principal components $A,G_1,G_2$ obtained through SVD](Images_decomposition.jpg){#fig:decomposition}
@@ -66,7 +66,9 @@ The surface is then reconstructed as follows:
     + $z(x,y) = \mathcal{F}^{-1}\left\{ \hat z(k_x,k_y) \right\}$
 where $\mathcal{F}^{-1}$ is the inverse Fourier transform and $\hat G_x(k_x,k_y)$ and $\hat G_y(k_x,k_y)$ are the Fourier transforms of the gradients $G_x$ and $G_y$.
 
-If one wants to reconstruct only main features of the roughness and ignore or smooth out small scale roughness, then a cut-off frequency can be introduced, in the GUI it is called `FFT cutoff` and provides the maximal wave number $k_{\max}$ (in percentage of Niquest frequency) beyond which the Fourier components are set to zero.
+If one wants to reconstruct only main features of the roughness and ignore or smooth out small scale roughness and noise, then a cut-off frequency can be introduced, in the GUI it is called `FFT cutoff` and provides the maximal wave number $k_{\max}$ (in percentage of Niquest frequency) beyond which the Fourier components are set to zero.
+
+**Caution:** my attempts to remove the curvature directly in the FFT space were not successful. The curvature is removed in the final step.
 
 ![FFT reconstruction of the surface $z(x,y)$](fft_reconstruction.png){#fig:surface_fft}
 
