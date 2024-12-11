@@ -30,10 +30,6 @@ import tempfile
 from sem2surface import constructSurface, get_pixel_width, log
 import datetime
 
-# Main settings (FIXME to be incorporated into GUI)
-# Plot_images_decomposition = True
-
-
 def header():
     # printed when running the code
     print("************************************************")
@@ -67,6 +63,15 @@ class SEMto3Dinterface:
         self.exit_button = Button(self.left_frame, text="Exit", command=self.exit_application)
         self.exit_button.pack(pady=10)
 
+        # Add a frame for Z scaling factor input
+        self.z_scale_frame = tk.LabelFrame(self.left_frame, text="Z Scaling Factor", padx=5, pady=5)
+        self.z_scale_frame.pack(pady=10, fill="x")
+
+        # Add an entry for Z scaling factor
+        self.z_scale_entry = tk.Entry(self.z_scale_frame)
+        self.z_scale_entry.insert(0, 1e-6)  # Default value
+        self.z_scale_entry.pack(fill="x")
+
 
         # Add a frame for output format selection
         self.format_frame = tk.LabelFrame(self.left_frame, text="Output Format", padx=5, pady=5)
@@ -74,8 +79,6 @@ class SEMto3Dinterface:
 
         # Variable to store the selected format
         self.output_format = tk.StringVar(value="do not save")  # Default value
-
-        
 
         # Radio buttons for format selection
         formats = [("CSV", "CSV"), ("NPZ", "NPZ"), ("VTK", "VTK"), ("do not save", "do not save")]
@@ -311,7 +314,7 @@ class SEMto3Dinterface:
                 tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
                 os.system(f"convert {filepath} -geometry 25% {tmp_file.name} > /dev/null 2>&1")
                 display_path = tmp_file.name
-                self.filepaths[index] = display_path
+                self.filepaths[index] = display_path 
             else:
                 display_path = filepath
 
@@ -443,16 +446,17 @@ class SEMto3Dinterface:
         gauss_filter = self.gauss_filter_enabled.get()
         gauss_sigma = self.gauss_filter_value.get() if gauss_filter else 0
 
-        imgName = constructSurface(imgNames, 
+        imgName, _, _ ,_ = constructSurface(imgNames, 
                                    Plot_images_decomposition, 
                                    gauss_filter,  # Use the Gauss filter setting
                                    gauss_sigma,   # Use the Gauss filter value
                                    self.reconstruction_mode.get(),  # Use the selected reconstruction mode
-                                   self.remove_curvature.get(),  # Use the Remove Curvature setting
+                                   RemoveCurvature = self.remove_curvature.get(),  # Use the Remove Curvature setting
                                    cutoff_frequency=0.01*cutoff_percentage,
                                    save_file_type=self.output_format.get(),
                                    time_stamp=self.timestamp_enabled.get(),
                                    pixelsize=pixelsize, # put pixelsize in meters
+                                   ZscalingFactor=float(self.z_scale_entry.get()),
                                    logFile=logFile)
         self.display_reconstruction(imgName)
 

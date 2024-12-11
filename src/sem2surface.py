@@ -30,13 +30,12 @@ import vtk
 import datetime
 
 pixelsize0 = 1e-6 # default value in meter, if the user asks to search in the TIF file, but there is no PixelWidth in the TIF file
-ZscalingFactor = 1./11546.488204918922 # 400 / 3.25521e-07 # Rather random z-scaling factor, normally should be extracted from known topography, e.g. indenter imprint # FIXME bring it to the GUI
+# ZscalingFactor = 1./11546.488204918922
 
 # Configure Matplotlib to use LaTeX for text rendering
 plt.rcParams['font.family'] = 'serif'
 plt.rcParams['font.serif'] = ['Palatino'] 
 plt.rcParams['text.usetex'] = True
-# Set the font to pxfonts
 plt.rcParams['text.latex.preamble'] = r'\usepackage{pxfonts}'
 
 def write_vtk(filename, X, Y, z):
@@ -89,7 +88,6 @@ def write_vtk(filename, X, Y, z):
     writer.SetInputData(grid)
     writer.Write()
 
-
 # Function that outputs log information both in terminal and log file
 def log(logFile, text):
     print("*     "+text)
@@ -97,9 +95,9 @@ def log(logFile, text):
 
 def parabolic_surface(params, X, Y):
     a, b, c = params
-    x0 = X.shape[1]/2.
-    y0 = X.shape[0]/2.
-    return 0.5*(((X-x0)/a)**2 + ((Y-y0)/b)**2) + c
+    x0 = (np.max(X[0,:]) - np.min(X[0,:]))/2.
+    y0 = (np.max(Y[:,0]) - np.min(Y[:,0]))/2.
+    return (X-x0)**2/(2*a) + (Y-y0)**2/(2*b) + c
 def objective_function(params, X, Y, Z):
     return np.sum((Z - parabolic_surface(params, X, Y))**2)
 
@@ -171,38 +169,33 @@ def get_pixel_width(filename):
 # See: R.T. Frankot, R. Chellappa (1988). Method for enforcing integrability in 
 # shape from shading algorithms, IEEE Trans. Pattern Anal. Mach. Intell. 10(4):439-451.
 # #######################################################################################
-def reconstruct_surface_FFT(Gx, Gy, pixelsize, cutoff=0):
+def reconstruct_surface_FFT(Gx, Gy, pixelsize, cutoff = 0):
     # Fourier transform of the gradients
     Cx = np.fft.fft2(Gx) 
     Cy = np.fft.fft2(Gy) 
-
     n, m = Gx.shape
-
-    # # Create a 2D Hamming window (if needed, I do not see any changes)
-    # window_1D_n = np.hamming(n)
-    # window_1D_m = np.hamming(m)
-    # window_2D = np.outer(window_1D_n, window_1D_m)
-    # # Apply the window to the image
-    # Gx = Gx * window_2D
-    # Gy = Gy * window_2D
 
     # Wave numbers
     kx = np.fft.fftshift(np.arange(0, m) - m / 2) 
     ky = np.fft.fftshift(np.arange(0, n) - n / 2)  
     Kx, Ky = np.meshgrid(kx, ky)
-    # Cutoff high-frequency components if needed
-    if cutoff > 0:    
+
+    # Cutoff high-frequency (to remove noise) components if needed
+    if cutoff > 0:
         cutoff_sq = (min(m,n)*cutoff/2)**2
-        for i in range(m):  
-            for j in range(n):
-                if i**2 + j**2 > cutoff_sq and (i-m)**2 + j**2 > cutoff_sq and \
-                (i-m)**2 + (j-n)**2 > cutoff_sq and i**2 + (j-n)**2 > cutoff_sq:
-                        Cx[j, i] = 0
-                        Cy[j, i] = 0
+        # Create a mask for high frequencies using vectorized operations
+        freq_mask = ((Kx**2 + Ky**2) > cutoff_sq) & ((Kx**2 + (Ky-n)**2) > cutoff_sq) & \
+                    ((Kx-m)**2 + (Ky-n)**2) > cutoff_sq & ((Kx-m)**2 + Ky**2) > cutoff_sq
+        # Apply mask to both Fourier transforms
+        Cx[freq_mask] = 0
+        Cy[freq_mask] = 0
+
 
     # The minimizer is given by the inverse Fourier transform of the solution
     denom = Kx**2 + Ky**2
     C = np.where(denom != 0, -1j * ( Ky * Cx + Kx * Cy) / denom, 0)
+
+    #CAUTION: Do not try to remove curvature in Fourier space, it can produce a lot of artefacts!
 
     # Return to real space
     Cinv = np.fft.ifft2(C)
@@ -248,6 +241,51 @@ def reconstruct_surface_direct_integration(Gx, Gy, pixelsize):
     
     return z
 
+def plot_image_decomposition(imgs, img1, G1, G2, timeStamp, logFile):
+    """
+    Plot the images: top row is original images, bottom row is polar decomposition
+    """
+    # Plot the images: top row is original images, bottom row is polar decomposition
+    fig,ax = plt.subplots(2,3,figsize=(12,8))
+    # remove all ticks and labels
+    for axi in ax.flat:
+        axi.xaxis.set_visible(False)
+        axi.yaxis.set_visible(False)
+    # Decrease spacing between subplots
+    plt.subplots_adjust(wspace=0., hspace=0.)
+    # Decrease margins
+    plt.subplots_adjust(left=0.05, right=0.95, top=0.9, bottom=0.1)
+
+    plt.subplot(2,3,1)
+    plt.imshow(imgs[0])
+    plt.title("Image 1, $I_1$")
+
+    plt.subplot(2,3,2)
+    plt.imshow(imgs[1])
+    plt.title("Image 2, $I_2$")
+
+    plt.subplot(2,3,3)
+    plt.imshow(imgs[2])
+    plt.title("Image 3, $I_3$")
+
+    plt.subplot(2,3,4)
+    plt.imshow(img1)
+    plt.title("Principal Image, $A$")
+
+    plt.subplot(2,3,5)
+    plt.imshow(G1)
+    plt.title("Normalized principal Image 2, $G_1$")
+
+    plt.subplot(2,3,6)
+    plt.imshow(G2)
+    plt.title("Normalized principal Image 3, $G_2$")
+
+    plt.tight_layout()
+    # Save with a unique identifier with a time tag and save in info in log file
+    filename = "Images_decomposition" + timeStamp + ".png"
+    fig.savefig(filename, dpi=300)
+    log(logFile,"Images decomposition saved to " + filename)
+
 def plot_radon_rms(total_angles, total_rms, filename=None):
     plt.figure(figsize=(6, 4))
     
@@ -281,7 +319,7 @@ def plot_radon_rms(total_angles, total_rms, filename=None):
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 
-def compute_robust_gradients(imgs):
+def compute_image_gradients(imgs):
     """
     Compute robust gradients using PCA-like approach with proper correlation matrix
     
@@ -312,11 +350,7 @@ def compute_robust_gradients(imgs):
     
     # Perform SVD on the correlation matrix
     U, S, V = np.linalg.svd(CorrMatrix)
-    
-    print("U = ", U)
-    print("S = ", S)
-    print("V = ", V)
-    
+        
     # Reconstruct images using the first two principal components
     img_shape = imgs[0].shape
     img1 = np.zeros(img_shape)
@@ -344,7 +378,23 @@ def compute_robust_gradients(imgs):
     return img1, G1, G2
 
 
-def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, ReconstructionMode,RemoveCurvature=False, cutoff_frequency=0, save_file_type="", time_stamp=False, pixelsize=None, logFile=None):
+def constructSurface(imgNames, 
+                     Plot_images_decomposition, 
+                     GaussFilter, 
+                     sigma, 
+                     ReconstructionMode,
+                     RemoveCurvature=False, 
+                     cutoff_frequency=0, 
+                     save_file_type="", 
+                     time_stamp=False, 
+                     pixelsize=None, 
+                     ZscalingFactor=1.0, 
+                     logFile=None,
+                     Rx = None,
+                     Ry = None):
+        """
+        Construct the surface from the images
+        """
         # Create a log file with time stamp        
         now = datetime.datetime.now()
         if time_stamp:
@@ -365,6 +415,7 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
         log(logFile,"   / Output file type = " + str(save_file_type))
         log(logFile,"   / Time stamp = " + str(time_stamp)[1:])
         log(logFile,"   / Pixel size = " + str(pixelsize))
+        log(logFile,"   / Z scaling factor = " + str(ZscalingFactor))
 
         # Save the names of the images to the log file
         log(logFile,"Images folder:" + "/".join(imgNames[0].split("/")[:-1]))
@@ -372,7 +423,10 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
         for imgName in imgNames:
             log(logFile,"    / " + imgName.split("/")[-1])
         
-
+# ======================================================================== #
+#   1. Read the images, remove the white line at the bottom of the image   #
+#   1.2 If required, filter the images with a Gaussian filter              #
+# ======================================================================== #
         tmp = plt.imread(imgNames[0])
         # Detect first white line in the image
         cutY = tmp.shape[0]
@@ -392,103 +446,25 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
         imgs[2] = np.nan_to_num(imgs[2])
 
         if GaussFilter:
-            print("Gauss filter is applied")
             # Gauss filter all gradient images
             for i in range(imgs.shape[0]):
-                for j in range(imgs.shape[1]):
-                    imgs[i,j] = gaussian_filter(imgs[i,j], sigma=sigma)
+                imgs[i] = gaussian_filter(imgs[i], sigma=sigma)
+            log(logFile,"Gauss filter with sigma = " + str(sigma) + " is applied to all images.")
 
-        # # Construct correlation matrix between images imgs[0], imgs[1], and imgs[2]
-        # N = len(imgs)
-        # CorrMatrix = np.zeros((N,N))
-        # for i in range(N):
-        #     for j in range(N):
-        #         CorrMatrix[i,j] = np.dot(imgs[i].flatten(), imgs[j].flatten())
-
-        # # Do polar decomposition (or SVD) of the correlation matrix
-        # U, S, V = np.linalg.svd(CorrMatrix)
-        # print("CorrMatrix SVD = ", CorrMatrix)
-        # print("U = ", U)
-        # print("S = ", S)
-        # print("V = ", V)
-        # img1 = np.zeros(imgs[0].shape)
-        # img2 = np.zeros(imgs[0].shape)
-        # img3 = np.zeros(imgs[0].shape)
-
-        # for i in range(N):
-        #     img1 += U[i,0]*imgs[i]
-        #     img2 += U[i,1]*imgs[i]
-        #     img3 += U[i,2]*imgs[i]
-        # # To avoid eventual division by zero
-        # meanImg1 = np.mean(img1)
-        # img1 = np.where(img1 == 0, meanImg1, img1)
-        # # Gradient along unknown directions are given by
-        # G1 = img2/img1
-        # G2 = img3/img1        
-
-        img1, G1, G2 = compute_robust_gradients(imgs)
+# ======================================================================== #
+#   2. Construct correlation matrix and compute image gradients            #
+#   3. SVD to find the principal components and compute image gradients    #
+#   4. Compute image gradients from the principal components               #
+# ======================================================================== #
+        img1, G1, G2 = compute_image_gradients(imgs)
 
         if Plot_images_decomposition:
-            # Plot the images: top row is original images, bottom row is polar decomposition
-            fig,ax = plt.subplots(2,3,figsize=(12,8))
-            # remove all ticks and labels
-            for axi in ax.flat:
-                axi.xaxis.set_visible(False)
-                axi.yaxis.set_visible(False)
-            # Decrease spacing between subplots
-            plt.subplots_adjust(wspace=0., hspace=0.)
-            # Decrease margins
-            plt.subplots_adjust(left=0.05, right=0.95, top=0.9, bottom=0.1)
-
-            plt.subplot(2,3,1)
-            plt.imshow(imgs[0])
-            plt.title("Image 1, $I_1$")
-
-            plt.subplot(2,3,2)
-            plt.imshow(imgs[1])
-            plt.title("Image 2, $I_2$")
-
-            plt.subplot(2,3,3)
-            plt.imshow(imgs[2])
-            plt.title("Image 3, $I_3$")
-
-            plt.subplot(2,3,4)
-            plt.imshow(img1)
-            plt.title("Principal Image, $A$")
-
-            plt.subplot(2,3,5)
-            plt.imshow(G1)
-            plt.title("Normalized principal Image 2, $G_1$")
-
-            plt.subplot(2,3,6)
-            plt.imshow(G2)
-            plt.title("Normalized principal Image 3, $G_2$")
-
-            plt.tight_layout()
-            # Save with a unique identifier with a time tag and save in info in log file
-            filename = "Images_decomposition" + timeStamp + ".png"
-            fig.savefig(filename, dpi=300)
-            log(logFile,"Images decomposition saved to " + filename)
+            plot_image_decomposition(imgs, img1, G1, G2, timeStamp, logFile)
 
 
-
+# =============================================================================== #
+#   5. Use Radon transform to find the angle of the main gradient directions      #
 # ============================================================================== #
-#   Use Radon transform to find the angle of the main gradient directions        #
-# ============================================================================== #
-        # theta = np.linspace(0., 180., 180, endpoint=False)
-        # G1c = np.zeros(G1.shape)
-        # xc = G1.shape[0]/2
-        # yc = G1.shape[1]/2
-        # rad = min(G1.shape[0],G1.shape[1])/2
-        # for i in range(G1.shape[0]):
-        #     for j in range(G1.shape[1]):
-        #         if (i - xc)**2 + (j - yc)**2 < rad**2:
-        #             G1c[i,j] = G1[i,j]
-        # R1 = radon(G1c, theta=theta, circle=True)
-        # R1t = np.sum((R1 - np.mean(R1, axis=0))**2, axis=0)
-        # theta1 = theta[np.argmin(R1t)]
-        # theta2 = theta1 + 90
-
         # Construct the Radon transform of the gradient images
         # To accelerate do it in an iterative manner and for G1 only
         n_dissection = 10
@@ -550,27 +526,10 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
             filename = "RadonTransformRMS" + timeStamp + ".pdf"
             plot_radon_rms(total_angles, total_rms, filename=filename)
             log(logFile,"Radon transform RMS saved to " + filename)
-        #     fig,ax = plt.subplots()
-        #     plt.xlim([0, 180])
-        #     plt.xlabel("Projection angle (deg)")
-        #     plt.ylabel("RMS of Radon transform")
-        #     # plt.ylim([0, 1.05*max(np.max(R1t),np.max(R2t))])
-        #     # plt.ylim([0, 1.05*np.max(R1t)])
 
-        #     # plt.plot(theta, R1t, label="R1")
-        #     plt.plot(Radon_angles, Radon_rms, label="R1")
-        #     # plt.plot(theta, R2t, label="R2")
-        #     plt.axhline(y=0, color="k", linestyle="--")
-        #     plt.legend(loc="best")
-        #     plt.axvline(x=theta1, color="r", linestyle="--")
-        #     plt.text(theta1*0.95, 0.4e6, "$\\theta_1$ = {0:.1f}".format(theta1), color="r")
-        #     plt.axvline(x=theta2, color="b", linestyle="--")
-        #     plt.text(theta2*0.95, 0.4e6, "$\\theta_2$ = {0:.1f}".format(theta2), color="b")
-        #     # Save with a unique identifier with a time tag and save in info in log file
-        #     filename = "RadonTransformRMS" + timeStamp + ".pdf"
-        #     fig.savefig(filename)
-
-        # Compute gradients along x and y directions
+# =================================================================================== #
+#   6. Reorient gradients along x and y directions (oriented along theta1 and theta2) #
+# =================================================================================== #
         Gx = np.cos(theta1*np.pi/180.)*G1 + np.cos(theta2*np.pi/180.)*G2
         Gy = np.sin(theta1*np.pi/180.)*G1 + np.sin(theta2*np.pi/180.)*G2
 
@@ -605,12 +564,13 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
             fig.savefig(filename, dpi=300)
             log(logFile,"Gradients along x and y directions are saved to " + filename)
 
+# ========================================================= #
+#     7. Reconstruct the surface from gradients Gx,Gy       #
+# ========================================================= #
         reconstruction_type = ""
         if ReconstructionMode == "FFT":
-            z = reconstruct_surface_FFT(Gx, Gy, pixelsize, cutoff=cutoff_frequency)
+            z = reconstruct_surface_FFT(Gx, Gy, pixelsize, cutoff_frequency)
             reconstruction_type = "FFT"
-            # z *= ZscalingFactor * pixelsize # Rather random z-scaling factor
-            z *= ZscalingFactor * pixelsize / (6.51042e-08)
         elif ReconstructionMode == "DirectIntegration":
             z = reconstruct_surface_direct_integration(Gx, Gy, pixelsize)
             reconstruction_type = "DirectIntegration"
@@ -619,35 +579,99 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
             logFile.close()
             return None      
 
-        z *= 1e6 # convert to micrometers
+        # convert to micrometers and scale according to user-defined scaling
+        scalingFactorAndUnits = 1e6 * ZscalingFactor
+        z = scalingFactorAndUnits * z 
         n,m = z.shape
-        X,Y = np.meshgrid(np.arange(0, m), np.arange(0, n))
+        X,Y = np.meshgrid(np.arange(0, m*pixelsize*1e6, pixelsize*1e6), np.arange(0, n*pixelsize*1e6, pixelsize*1e6))
 
-        if RemoveCurvature:
-            # Remove curvature defect by trying both positive and negative curvatures
-            initial_params_pos = [n/5., m/5., 0]
-            initial_params_neg = [-n/5., -m/5., 0]
+# ========================================================= #
+#          8. Remove curvature defect                       #
+# ========================================================= #
+        # if RemoveCurvature and Rx is None:
+        #     # Remove curvature defect by trying both positive and negative curvatures
+        #     ZXamplitude = np.max(z[0,:]) - np.min(z[0,:])
+        #     print("ZXamplitude = ", ZXamplitude)
+        #     ZYamplitude = np.max(z[:,0]) - np.min(z[:,0])
+        #     print("ZYamplitude = ", ZYamplitude)
+        #     Xamplitude = (np.max(X[0,:]) - np.min(X[0,:]))*pixelsize*1e6
+        #     print("Xamplitude = ", Xamplitude)
+        #     Yamplitude = (np.max(Y[:,0]) - np.min(Y[:,0]))*pixelsize*1e6
+        #     print("Yamplitude = ", Yamplitude)
+        #     Rx = Xamplitude**2/(8*ZXamplitude)
+        #     Ry = Yamplitude**2/(8*ZYamplitude)
+        #     initial_params_pos = [Rx, Ry, 0]
+        #     initial_params_neg = [-Rx, -Ry, 0]
 
-            # Try fitting with positive curvature
-            result_pos = minimize(objective_function, initial_params_pos, args=(X, Y, z), bounds=[(0.1, None), (0.1, None), (-np.inf, np.inf)])
-            error_pos = objective_function(result_pos.x, X, Y, z)
+        #     print(initial_params_pos)
+        #     print(initial_params_neg)
 
-            # Try fitting with negative curvature 
-            result_neg = minimize(objective_function, initial_params_neg, args=(X, Y, z), bounds=[(-np.inf, -0.1), (-np.inf, -0.1), (-np.inf, np.inf)])
-            error_neg = objective_function(result_neg.x, X, Y, z)
+        #     # Try fitting with positive curvature
+        #     result_pos = minimize(objective_function, initial_params_pos, args=(X, Y, z), bounds=[(0., np.inf), (0., np.inf), (-np.inf, np.inf)])
+        #     error_pos = objective_function(result_pos.x, X, Y, z)
 
-            # Use the fit with smaller error
-            if error_pos < error_neg:
-                result = result_pos
-                curvature_type = "positive"
+        #     # Try fitting with negative curvature 
+        #     result_neg = minimize(objective_function, initial_params_neg, args=(X, Y, z), bounds=[(-np.inf, -0.), (-np.inf, -0.), (-np.inf, np.inf)])
+        #     error_neg = objective_function(result_neg.x, X, Y, z)
+
+        #     # Use the fit with smaller error
+        #     if error_pos < error_neg:
+        #         result = result_pos
+        #         curvature_type = "positive"
+        #     else:
+        #         result = result_neg
+        #         curvature_type = "negative"
+
+        #     # Subtract the parabolic surface
+        #     a, b, c = result.x
+        #     log(logFile,f"Curvature defect removal ({curvature_type} curvature), parameters: Rx = {a:.2f} um, Ry = {b:.2f} um")
+        #     P = parabolic_surface(result.x, X, Y)
+        #     z -= P
+        if RemoveCurvature and Rx is None:
+            # Fit parabolas at the edges
+            xlin = X[0,:].copy()
+            ylin = Y[:,0].copy()
+            ZXlin = z[0,:].copy()
+            ZYlin = z[:,0].copy()
+            def parabola(x,x0,R,z0):
+                return (x-x0)**2/(2*R) + z0
+            from scipy.optimize import curve_fit
+            popt, pconv  = curve_fit(parabola, xlin, ZXlin)
+            poptneg, pconvneg  = curve_fit(parabola, xlin, -ZXlin)
+            if popt[1] < poptneg[1]:    
+                Rx = popt[1]
             else:
-                result = result_neg
-                curvature_type = "negative"
+                Rx = -poptneg[1]
+            popt, pconv  = curve_fit(parabola, ylin, ZYlin)
+            poptneg, pconvneg  = curve_fit(parabola, ylin, -ZYlin)
+            if popt[1] < poptneg[1]:
+                Ry = popt[1]
+            else:
+                Ry = -poptneg[1]
+            Lx = np.max(X[0,:]) - np.min(X[0,:])
+            Ly = np.max(Y[:,0]) - np.min(Y[:,0])
 
-            # Subtract the parabolic surface
+            print("Rx = ", Rx)
+            print("Ry = ", Ry)
+            initial_params = [Rx, Ry, 0.0]
+            # Fit over the contour
+            # filter = np.where((X < 0.2*Lx) & (X > 0.8*Lx) & (Y < 0.2*Ly) & (Y > 0.8*Ly))
+            result = minimize(objective_function, initial_params,
+                                args=(X, Y, z),
+                                bounds=[(-np.inf, np.inf), (-np.inf, np.inf), (-np.inf, np.inf)])
+            error = objective_function(result.x, X, Y, z)
+
+            # Subtract the fitted parabolic surface
             a, b, c = result.x
-            log(logFile,f"Curvature defect removal ({curvature_type} curvature), parameters: Rx = {a:.2f} um, Ry = {b:.2f} um")
+            log(logFile, f"Curvature defect removal (Rx = {a:.2f} um, Ry = {b:.2f} um)")
             P = parabolic_surface(result.x, X, Y)
+            z -= P
+        elif Rx is not None and Ry is not None:
+            # Remove curvature defect by fitting a parabolic surface
+            a, b, c = Rx, Ry, 0
+            log(logFile,f"Curvature defect removal (Rx = {a:.2f} um, Ry = {b:.2f} um)")
+            P = parabolic_surface([a,b,c], X, Y)
+            print(np.max(P),np.min(P))
             z -= P
 
 #========================================================= #
@@ -717,5 +741,5 @@ def constructSurface(imgNames, Plot_images_decomposition, GaussFilter, sigma, Re
         log(logFile,"Successfully finished at " + now.strftime("%Y-%m-%d %H:%M:%S") + "\n")
         logFile.close()
 
-        return returnImgName
+        return returnImgName, X, Y, z
 
