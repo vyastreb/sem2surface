@@ -11,6 +11,8 @@ This repository contains a Python-based solution for 3D surface reconstruction f
 For qualitative results, any scaling factor for the vertical axis can be applied to the final surface. However, to get the quantitative results, the scaling factor has to be provided.
 The simplest way to find the scaling factor is to use the Vickers hardness test's imprint as a reference surface for the given SEM and given material. The `fit_Vickers_indenter.py` module enables to find the scaling factor from the Vickers hardness test's imprint.
 
+![Reconstruction of the indented surface](img/indent_superposition.jpg)
+
 ## Features
 
 - **Intuitive GUI**: A user-friendly simplistic interface built with Python's Tkinter allows for easy image uploads and 3D surface construction.
