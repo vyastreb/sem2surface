@@ -23,9 +23,9 @@ import os
 import sem2surface as s2s
 
 # Load the data
-imgNames = ['P33_scale1_detectorA.tif',
-            'P33_scale1_detectorB.tif',
-            'P33_scale1_detectorC.tif']
+imgNames = ['P33_scale2s1_detectorA.tif',
+            'P33_scale2s1_detectorB.tif',
+            'P33_scale2s1_detectorC.tif']
 
 GaussFilter = False
 sigma = 1.
