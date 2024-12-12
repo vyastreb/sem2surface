@@ -14,14 +14,10 @@
 #---------------------------------------------------------------------------#
 
 import sem2surface as s2s
-
 import numpy as np
-import matplotlib.gridspec as gridspec
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-from scipy.optimize import minimize
 import matplotlib.pyplot as plt
  
-# Load indentation surface data
+# Load indentation SEM data, at least 3 images
 imgNames = ["Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_A_05.tif",\
             "Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_C_05.tif",\
             "Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_B_05.tif"]
@@ -35,8 +31,7 @@ Time_stamp = False
 Plot_images_decomposition = False
 ZscalingFactor = 1.e-4
 # Indenter parameters
-Rbig = 15 # Radius around indenter to exclude (adjust as needed)
-R = 7 # Radius inside the indenter, should be big enough to include as much of the indenter as possible, but small enough to be kept entirely inside the indenter imprint region
+R = 7 # (micrometers) Radius inside the indenter, should be big enough to include as much of the indenter as possible, but small enough to be kept entirely inside the indenter imprint region
 
 pixelsize = s2s.get_pixel_width(imgNames[0])
 _,X,Y,z = s2s.constructSurface(imgNames, 
@@ -51,8 +46,6 @@ _,X,Y,z = s2s.constructSurface(imgNames,
                          pixelsize=pixelsize, 
                          ZscalingFactor=ZscalingFactor,
                          logFile=None)
-
-
 
 #  Vicker's indenter pyramid with 136° angle at opposing faces
 #        136°
@@ -92,11 +85,14 @@ def VickerIndenter(X,Y,X0,Y0,R,rot,depth,scale):
 
 # Work in micrometers
 pixelsize *= 1e6
+print("Pixelsize=",pixelsize)
 sign = 1.
 # Find the appropriate scaling for Vicker's imprint
-if np.nanmax(z) > np.nanmin(z):
+meanz = np.nanmean(z)
+if np.nanmax(z) - meanz > meanz - np.nanmin(z):
     z *= -1.
     sign = -1.
+# Find the deepest point and assign it to the Vicker's pyramid summit
 Y0i,X0i = np.where(np.nanmin(z) == z)
 
 X0 = X0i[0]*pixelsize
@@ -123,69 +119,6 @@ zp = z.copy()
 zp[mask] = np.nan
 
 maxDepth = np.nanmin(zp)
-
-# ========================================================== #
-#      Remove the curvature defect from the surface          #
-#           ignoring the Vicker's indenter imprint           #
-# ========================================================== #
-
-# # Create a mask to exclude the Vicker's indenter imprint region
-# indenter_mask = (X-X0)**2 + (Y-Y0)**2 <= Rbig**2
-
-# # Only use points outside the indenter region for curvature fitting
-# z_fit = z.copy()
-# z_fit[indenter_mask] = np.nan
-# n,m = z_fit.shape
-
-# fig, ax = plt.subplots()
-# bar = ax.imshow(z_fit, extent=[0,X.shape[1]*pixelsize, 0, X.shape[0]*pixelsize])
-# fig.colorbar(bar)
-# ax.set_title("Surface for curvature fitting\n(indenter region excluded)")
-# fig.savefig("z_without_indenter.png",dpi=300)
-
-# initial_params_pos = [n/5., m/5., 0]
-# initial_params_neg = [-n/5., -m/5., 0]
-
-# # Modified objective function that ignores NaN values
-# def masked_objective_function(params, X, Y, Z):
-#     P = s2s.parabolic_surface(params, X, Y)
-#     diff = Z - P
-#     return np.nansum(diff**2) # nansum ignores NaN values
-
-# # Try fitting with positive curvature
-# result_pos = minimize(masked_objective_function, initial_params_pos, args=(X, Y, z_fit), 
-#                      bounds=[(0.1, None), (0.1, None), (-np.inf, np.inf)])
-# error_pos = masked_objective_function(result_pos.x, X, Y, z_fit)
-
-# # Try fitting with negative curvature 
-# result_neg = minimize(masked_objective_function, initial_params_neg, args=(X, Y, z_fit),
-#                      bounds=[(-np.inf, -0.1), (-np.inf, -0.1), (-np.inf, np.inf)])
-# error_neg = masked_objective_function(result_neg.x, X, Y, z_fit)
-
-# # Use the fit with smaller error
-# if error_pos < error_neg:
-#     result = result_pos
-#     curvature_type = "positive"
-# else:
-#     result = result_neg
-#     curvature_type = "negative"
-
-# # Subtract the parabolic surface
-# a, b, c = result.x
-# print(f"Curvature defect removal ({curvature_type} curvature), parameters: Rx = {a:.2f} um, Ry = {b:.2f} um")
-# P = s2s.parabolic_surface(result.x, X, Y)
-# z -= P
-
-# fig, ax = plt.subplots()
-# bar = ax.imshow(z, extent=[0,X.shape[1]*pixelsize, 0, X.shape[0]*pixelsize])
-# fig.colorbar(bar)
-# ax.set_title("Surface after curvature defect removal")
-# fig.savefig("z_rectified.png",dpi=300)
-
-# Find the appropriate rotation, depth and scaling for Vicker's imprint
-# def VickerIndenter(X,Y,X0,Y0,R,rot,depth,scale):
-# opt = minimize(lambda x: np.sum((VickerIndenter(X,Y,X0,Y0,R,x[0],maxDepth,x[1]) - zp)**2), [0.4,1e4], bounds=[(-np.pi/2,np.pi/2),(0.1,1e6)])
-
 depth = maxDepth
 
 # ============================================================================ #
@@ -238,14 +171,14 @@ for step in angle_steps:
 
 rot = best_rot
 scale = best_scale
-ZscalingFactor /= -scale
+ZscalingFactor /= scale
 
-print(f"Best rotation = {rot*180/np.pi:.2f} degrees, {best_rot:.2e} rad")
-print(f"Best scale = {ZscalingFactor:.5e}")
+print(f"\n===============================\n Scaling factor = {ZscalingFactor:.7e}\n===============================\n")
 
 zind = VickerIndenter(X,Y,X0,Y0,R,rot,depth,1)
 zp -= np.nanmin(zp)
-zp *= ZscalingFactor
+# zp *= ZscalingFactor
+zp /= scale
 
 # Create figure with 3 subplots in one row
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
@@ -254,14 +187,18 @@ fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
 im1 = ax1.imshow(zp[limy0:limy1,limx0:limx1], 
                  extent=[limy0*pixelsize, limy1*pixelsize, limx0*pixelsize, limx1*pixelsize])
 ax1.set_title("Real Indenter")
-fig.colorbar(im1, ax=ax1)
+fig.colorbar(im1, ax=ax1, label=r"$z$, $\mu$m")
+ax1.set_xlabel(r"$x$, $\mu$m")
+ax1.set_ylabel(r"$y$, $\mu$m")
 
 # Plot ideal indenter surface
 zind_norm = zind[limy0:limy1,limx0:limx1]-np.nanmin(zind)
 im2 = ax2.imshow(zind_norm,
                  extent=[limy0*pixelsize, limy1*pixelsize, limx0*pixelsize, limx1*pixelsize])
 ax2.set_title(f"Ideal Indenter\nRot = {rot*180/np.pi:.3f}°")
-fig.colorbar(im2, ax=ax2)
+fig.colorbar(im2, ax=ax2, label=r"$z$, $\mu$m")
+ax2.set_xlabel(r"$x$, $\mu$m")
+ax2.set_ylabel(r"$y$, $\mu$m")
 
 # Plot normalized difference
 diff = (zind_norm-zp[limy0:limy1,limx0:limx1])
@@ -282,6 +219,7 @@ fig.savefig(f"Indenter_comparison_{ZscalingFactor:.4e}.png", dpi=300)
 # ============================================================================ #
 #   Reconstruct the surface with the identified scaling factor and curvatures  #
 # ============================================================================ #
+
 print("ZscalingFactor = ",ZscalingFactor)
 pixelsize = s2s.get_pixel_width(imgNames[0])
 _,X,Y,z = s2s.constructSurface(imgNames, 
@@ -296,7 +234,5 @@ _,X,Y,z = s2s.constructSurface(imgNames,
                          pixelsize=pixelsize, 
                          ZscalingFactor=ZscalingFactor,
                          logFile=None)
-# #                         #  Rx = -1e6/scale*a*sign,
-# #                         #  Ry = -1e6/scale*b*sign)
 
 

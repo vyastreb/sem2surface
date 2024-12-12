@@ -2,9 +2,12 @@
 
 ## Overview
 
-This repository contains a Python-based solution for 3D surface reconstruction from SEM/BSE images captured using a minimum of three detectors. The methodology leverages the Principal Component Analysis (PCA) of the captured images to discern the principal component images [1]. To reorient gradient images along $x$ and $y$ axes, the Radon transform is used. The final 3D surface, represented as \(z(x,y)\), is derived from its gradients either through the Frankot and Chellappa method [2] or via direct integration paired with a minimization process between adjacent profiles.
+This repository contains a Python-based solution for 3D surface reconstruction from SEM/BSE images captured using a minimum of three detectors. The methodology leverages the Principal Component Analysis (PCA) of the captured images to discern the principal component images [1]. To reorient gradient images along $x$ and $y$ axes, the Radon transform is used. The final 3D surface, represented as \(z(x,y)\), is derived from its gradients either through the Frankot and Chellappa method [2] (this is the reference method providing the best results) or via direct integration paired with a minimization process between adjacent profiles. 
 
 ![3D Surface Reconstruction from milti-detector SEM](explication.png)
+
+For qualitative results, any scaling factor for the vertical axis can be applied to the final surface. However, to get the quantitative results, the scaling factor has to be provided.
+The simplest way to find the scaling factor is to use the Vickers hardness test's imprint as a reference surface for the given SEM and given material. The `fit_Vickers_indenter.py` module enables to find the scaling factor from the Vickers hardness test's imprint.
 
 ## Features
 
@@ -20,25 +23,59 @@ This repository contains a Python-based solution for 3D surface reconstruction f
 
 ## Getting Started
 
-To launch the interface, execute the following command:
+Check that all required packages are installed:
+```bash
+$ pip install -r requirements.txt
 ```
+To launch the interface, execute the following command:
+```bash$$
 $ python sem2surface_gui.py
 ```
-Users can easily upload a minimum of three images (supported formats: JPG, PNG, TIFF, BMP) and initiate the reconstruction process by clicking the "3D Reconstruct" button.
+To run without GUI, use the following command (do not forget to provide your own images directly in the script):
+```bash
+$ python test_without_gui.py
+```
+A user has to upload at least three SEM images (supported formats: JPG, PNG, TIFF, BMP) and initiate the reconstruction process by clicking the "3D Reconstruct" button.
+
+## Graphical User Interface
+
+![Graphical User Interface](doc/sem2surface_gui.png)
+
+The interface is built with Python's Tkinter. The following functions/options are available:
+
+**Functions:**
++ **Upload Images** - upload at least three SEM images (supported formats: JPG, PNG, TIFF, BMP).
++ **Reshuffle Images** - reshuffle the uploaded images.
++ **Run 3D constr.** - initiate the reconstruction process.
++ **Exit** - close the interface.
+
+**Options:**
+- **Z Scaling Factor**: The scaling factor for the vertical axis (to be defined, e.g. through the Vickers hardness test's imprint)
+- **Output Format**: The format of the output file (CSV, VTK, NPZ) or "do not save"
+- **FFT Cutoff**: The cutoff frequency for the FFT reconstruction in percentage of the Nyquist frequency
+- **Pixel Size**: If the pixel size if provided in SEM-generated TIFF files, check the checkbox "From TIFF", otherwise provide the pixel size in m/pixel.
+- **Reconstruction Mode**: FFT (preferable) or direct integration
+- **Gauss Filter**: If True, a Gaussian filter is applied to the original images, `sigma` - the standard deviation of the Gaussian filter
+- **Add time stamp**: If checked, the time stamp is added to the output file name
+- **Remove Curvature**: If checked, the curvature is removed from the final surface, this is an important step for both qualitative and quantitative analysis.
+- **Save extra images**: If checked, several intermediate images are saved (PCA decomposition, Radon transform RMS change wrt the rotation angle, gradients visualisation along $x$ and $y$).
 
 ## Repository Structure
 
 - `src/`
   - `sem2surface.py`: Core module for 3D surface reconstruction from SEM/BSE images.
   - `sem2surface_gui.py`: GUI module.
-  - `VickersFit.py`: Module to find scaling factor from Vickers hardness test's imprint.
+  - `fit_Vickers_indenter.py`: Module to find scaling factor from Vickers hardness test's imprint.
+  - `test_without_gui.py`: Example of the script without GUI.
   - `logo.png`, `logo.svg`: Application logo.
 - `doc/`
   - `sem2surface.pdf`: Concise documentation.
   - other source files for the documentation.
-- `example/`
-  - Sample SEM images from different detectors.
-  - Sample output of the reconstructed surface.
+- `examples/`
+  - `Surface_1/`: Example of the script without GUI.
+  - `Surface_2/`: Example of the script without GUI.
+  - `Vickers_imprint/`: Example of the script without GUI.
+- `requirements.txt`: List of required packages.
 - `README.md`: This file.
 
 ## References
@@ -54,7 +91,14 @@ Users can easily upload a minimum of three images (supported formats: JPG, PNG, 
   - [yastrebov.fr](https://yastrebov.fr)
 - **Licence**: BSD 3-Clause License.
 
+## Examples
+
+![3D Surface Reconstruction from milti-detector SEM](big_surface.png)
+![3D Surface Reconstruction from milti-detector SEM](examples/Surface_1/VTK_view_x10.png)
+![3D Surface Reconstruction from milti-detector SEM](examples/Surface_1/VTK_view_x10.png)
+![3D Surface Reconstruction from Vickers hardness test](examples/Vickers_imprint/VTK_view.png)
+
 ## Acknowledgements
 
-The code was developed with the assistance of GPT-4, CoderPad plugin, and Copilot in VSCode.
+The code was developed with the assistance of GPT-4, CoderPad plugin, Copilot in VSCode and Claude 3.5 Sonnet in Cursor.
 

@@ -28,9 +28,10 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.optimize import minimize
 import vtk
 import datetime
+from scipy.optimize import curve_fit
+
 
 pixelsize0 = 1e-6 # default value in meter, if the user asks to search in the TIF file, but there is no PixelWidth in the TIF file
-# ZscalingFactor = 1./11546.488204918922
 
 # Configure Matplotlib to use LaTeX for text rendering
 plt.rcParams['font.family'] = 'serif'
@@ -116,33 +117,6 @@ def remove_outside_central_circle(img):
     # Crop the image to the central circle
     img = img[center_x-radius:center_x+radius, center_y-radius:center_y+radius]
     return modified_img
-
-def VickerIndenter(X,Y,X0,Y0,R,rot,depth,scale):
-    angle = 136 * np.pi / 180.
-    Xprime = (X-X0)*np.cos(rot) - (Y-Y0)*np.sin(rot)
-    Yprime = (X-X0)*np.sin(rot) + (Y-Y0)*np.cos(rot)
-    Z = np.zeros(X.shape)
-
-    mask = (X-X0)**2 + (Y-Y0)**2 > R**2
-
-    for i in range(X.shape[0]):
-        for j in range(X.shape[1]):
-            if Xprime[i,j] >= 0 and abs(Yprime[i,j]) < Xprime[i,j]:
-                Z[i,j] = depth + (Xprime[i,j])*np.tan(angle/2.)
-            elif Xprime[i,j] < 0 and abs(Yprime[i,j]) < abs(Xprime[i,j]):
-                Z[i,j] = depth - (Xprime[i,j])*np.tan(angle/2.)
-            elif Yprime[i,j] >= 0 and abs(Xprime[i,j]) < abs(Yprime[i,j]):
-                Z[i,j] = depth + (Yprime[i,j])*np.tan(angle/2.)
-            elif Yprime[i,j] < 0 and abs(Xprime[i,j]) < abs(Yprime[i,j]):
-                Z[i,j] = depth -(Yprime[i,j])*np.tan(angle/2.)
-            # else:
-            #     Z[i,j] = depth-(Yprime[i,j])*np.tan(angle/2.)
-            # else:
-            #     Z[i,j] = depth + R/np.sqrt(2)*np.tan(angle/2.)
-
-    Z[mask] = np.nan
-    Z *= scale
-    return Z
 
 # Extract pixel size from the tif image file (if it is there)
 def get_pixel_width(filename):
@@ -286,22 +260,19 @@ def plot_image_decomposition(imgs, img1, G1, G2, timeStamp, logFile):
     fig.savefig(filename, dpi=300)
     log(logFile,"Images decomposition saved to " + filename)
 
-def plot_radon_rms(total_angles, total_rms, filename=None):
+def plot_radon_rms(total_angles, total_rms, theta1, theta2, filename=None):
     plt.figure(figsize=(6, 4))
     
     # Find and highlight the minimum RMS angle
-    min_rms_index = np.argmin(total_rms)
-    min_angle = total_angles[min_rms_index]
-    min_angle2 = min_angle + 90
+    min_angle = theta1
+    min_angle2 = theta2
     max_rms = np.max(total_rms)
     total_rms = total_rms/max_rms
 
     plt.plot(total_angles, total_rms, 'k-', label='Radon RMS')
     plt.scatter(total_angles, total_rms, c='green', marker='o', s=20, zorder=10)
-    plt.ylim(0,1.0)
+    plt.ylim(None,1.0)
     
-    # plt.scatter(min_angle, min_rms, c='green', s=200, marker='*', 
-    #             label=f'Minimum RMS (Angle: {min_angle:.2f}°, RMS: {min_rms:.4f})')
     plt.axvline(x=min_angle, color="k", linestyle="--")
     plt.text(min_angle*1.05, 0.5, "$\\theta_1$ = {0:.2f}".format(min_angle), color="k")
     plt.axvline(x=min_angle2, color="k", linestyle="--")
@@ -315,9 +286,6 @@ def plot_radon_rms(total_angles, total_rms, filename=None):
     plt.tight_layout()
     if filename is not None:
         plt.savefig(filename)
-
-import numpy as np
-from sklearn.preprocessing import StandardScaler
 
 def compute_image_gradients(imgs):
     """
@@ -362,19 +330,14 @@ def compute_image_gradients(imgs):
         img2 += U[i, 1] * imgs[i]
         img3 += U[i, 2] * imgs[i]
     # Avoid division by zero
-    # Add a small epsilon to prevent division by zero
-    # epsilon = np.finfo(float).eps
     meanImg1 = np.mean(img1)
     img1 = np.where(img1 == 0, meanImg1, img1)
     
     # Compute gradients
     # Normalize by the first principal component image
-    
     G1 = img2 / (img1)
     G2 = img3 / (img1)    
-    
-    # Optional: You might want to normalize or scale G1 and G2 further
-    
+        
     return img1, G1, G2
 
 
@@ -389,12 +352,11 @@ def constructSurface(imgNames,
                      time_stamp=False, 
                      pixelsize=None, 
                      ZscalingFactor=1.0, 
-                     logFile=None,
-                     Rx = None,
-                     Ry = None):
+                     logFile=None):
         """
         Construct the surface from the images
         """
+        return_message = ""
         # Create a log file with time stamp        
         now = datetime.datetime.now()
         if time_stamp:
@@ -524,7 +486,7 @@ def constructSurface(imgNames,
 
         if Plot_images_decomposition:
             filename = "RadonTransformRMS" + timeStamp + ".pdf"
-            plot_radon_rms(total_angles, total_rms, filename=filename)
+            plot_radon_rms(total_angles, total_rms, theta1, theta2, filename=filename)
             log(logFile,"Radon transform RMS saved to " + filename)
 
 # =================================================================================== #
@@ -588,60 +550,20 @@ def constructSurface(imgNames,
 # ========================================================= #
 #          8. Remove curvature defect                       #
 # ========================================================= #
-        # if RemoveCurvature and Rx is None:
-        #     # Remove curvature defect by trying both positive and negative curvatures
-        #     ZXamplitude = np.max(z[0,:]) - np.min(z[0,:])
-        #     print("ZXamplitude = ", ZXamplitude)
-        #     ZYamplitude = np.max(z[:,0]) - np.min(z[:,0])
-        #     print("ZYamplitude = ", ZYamplitude)
-        #     Xamplitude = (np.max(X[0,:]) - np.min(X[0,:]))*pixelsize*1e6
-        #     print("Xamplitude = ", Xamplitude)
-        #     Yamplitude = (np.max(Y[:,0]) - np.min(Y[:,0]))*pixelsize*1e6
-        #     print("Yamplitude = ", Yamplitude)
-        #     Rx = Xamplitude**2/(8*ZXamplitude)
-        #     Ry = Yamplitude**2/(8*ZYamplitude)
-        #     initial_params_pos = [Rx, Ry, 0]
-        #     initial_params_neg = [-Rx, -Ry, 0]
-
-        #     print(initial_params_pos)
-        #     print(initial_params_neg)
-
-        #     # Try fitting with positive curvature
-        #     result_pos = minimize(objective_function, initial_params_pos, args=(X, Y, z), bounds=[(0., np.inf), (0., np.inf), (-np.inf, np.inf)])
-        #     error_pos = objective_function(result_pos.x, X, Y, z)
-
-        #     # Try fitting with negative curvature 
-        #     result_neg = minimize(objective_function, initial_params_neg, args=(X, Y, z), bounds=[(-np.inf, -0.), (-np.inf, -0.), (-np.inf, np.inf)])
-        #     error_neg = objective_function(result_neg.x, X, Y, z)
-
-        #     # Use the fit with smaller error
-        #     if error_pos < error_neg:
-        #         result = result_pos
-        #         curvature_type = "positive"
-        #     else:
-        #         result = result_neg
-        #         curvature_type = "negative"
-
-        #     # Subtract the parabolic surface
-        #     a, b, c = result.x
-        #     log(logFile,f"Curvature defect removal ({curvature_type} curvature), parameters: Rx = {a:.2f} um, Ry = {b:.2f} um")
-        #     P = parabolic_surface(result.x, X, Y)
-        #     z -= P
-        if RemoveCurvature and Rx is None:
-            # Fit parabolas at the edges
+        if RemoveCurvature:
+            # First, fit parabolas at the edges to get initial guess 
             xlin = X[0,:].copy()
             ylin = Y[:,0].copy()
             ZXlin = z[0,:].copy()
             ZYlin = z[:,0].copy()
             def parabola(x,x0,R,z0):
                 return (x-x0)**2/(2*R) + z0
-            from scipy.optimize import curve_fit
             popt, pconv  = curve_fit(parabola, xlin, ZXlin)
             poptneg, pconvneg  = curve_fit(parabola, xlin, -ZXlin)
             if popt[1] < poptneg[1]:    
                 Rx = popt[1]
             else:
-                Rx = -poptneg[1]
+                Rx = -poptneg[1]                
             popt, pconv  = curve_fit(parabola, ylin, ZYlin)
             poptneg, pconvneg  = curve_fit(parabola, ylin, -ZYlin)
             if popt[1] < poptneg[1]:
@@ -651,28 +573,26 @@ def constructSurface(imgNames,
             Lx = np.max(X[0,:]) - np.min(X[0,:])
             Ly = np.max(Y[:,0]) - np.min(Y[:,0])
 
-            print("Rx = ", Rx)
-            print("Ry = ", Ry)
             initial_params = [Rx, Ry, 0.0]
-            # Fit over the contour
-            # filter = np.where((X < 0.2*Lx) & (X > 0.8*Lx) & (Y < 0.2*Ly) & (Y > 0.8*Ly))
             result = minimize(objective_function, initial_params,
                                 args=(X, Y, z),
                                 bounds=[(-np.inf, np.inf), (-np.inf, np.inf), (-np.inf, np.inf)])
             error = objective_function(result.x, X, Y, z)
 
             # Subtract the fitted parabolic surface
-            a, b, c = result.x
-            log(logFile, f"Curvature defect removal (Rx = {a:.2f} um, Ry = {b:.2f} um)")
+            Rx, Ry, dz = result.x
             P = parabolic_surface(result.x, X, Y)
             z -= P
-        elif Rx is not None and Ry is not None:
-            # Remove curvature defect by fitting a parabolic surface
-            a, b, c = Rx, Ry, 0
-            log(logFile,f"Curvature defect removal (Rx = {a:.2f} um, Ry = {b:.2f} um)")
-            P = parabolic_surface([a,b,c], X, Y)
-            print(np.max(P),np.min(P))
-            z -= P
+
+            if Rx < 0 and Ry < 0:
+                log(logFile, f"Curvature was successfully removed: Rx = {Rx:.2f} um, Ry = {Ry:.2f} um, dz = {dz:.2f} um")
+            elif Rx * Ry < 0:
+                log(logFile, f"WARNING! WARNING! WARNING!\nWarning: Wrong order of images. Image was reconstructed but the results are not reliable. Images should be reordered in a different way: Rx = {Rx:.2f} um, Ry = {Ry:.2f} um, dz = {dz:.2f} um")
+                return_message = "Warning: Wrong order of images. The result is not reliable. Reshuffle images and run again."
+            else: # if both curvatures are negative, the image should be flipped
+                log(logFile, f"Curvatures were successfully removed: Rx = {Rx:.2f} um, Ry = {Ry:.2f} um, dz = {dz:.2f} um")
+                log(logFile, "The reconstructed surface is flipped.")
+                z *= -1
 
 #========================================================= #
 #            Plot the reconstructed surface                #
@@ -741,5 +661,5 @@ def constructSurface(imgNames,
         log(logFile,"Successfully finished at " + now.strftime("%Y-%m-%d %H:%M:%S") + "\n")
         logFile.close()
 
-        return returnImgName, X, Y, z
+        return returnImgName, X, Y, z, return_message
 

@@ -19,28 +19,25 @@
 #                                                                           #
 #---------------------------------------------------------------------------# 
 
+import os
 import sem2surface as s2s
 
 # Load the data
-imgNames = ["P33_scale2s1_detectorA.tif",\
-            "P33_scale2s1_detectorB.tif",\
-            "P33_scale2s1_detectorC.tif"]
-
-imgNames = ["P33_scale1_detectorA.tif",\
-            "P33_scale1_detectorB.tif",\
-            "P33_scale1_detectorC.tif"]
+imgNames = ['P33_scale1_detectorA.tif',
+            'P33_scale1_detectorB.tif',
+            'P33_scale1_detectorC.tif']
 
 GaussFilter = False
 sigma = 1.
-ReconstructionMode = "FFT" # "FFT" or "DirectIntegration"
+ReconstructionMode = "FFT"
 cutoff_frequency = 0.0
 RemoveCurvature = True
 Time_stamp = False
 Plot_images_decomposition = True
-ZscalingFactor = 1.4344045586814895e-05*100
+ZscalingFactor = 1.4076e-5
 
 pixelsize = s2s.get_pixel_width(imgNames[0])
-_,_,_,_ = s2s.constructSurface(imgNames, 
+_,_,_,_,message = s2s.constructSurface(imgNames, 
                          Plot_images_decomposition, 
                          GaussFilter, 
                          sigma, 
@@ -52,5 +49,8 @@ _,_,_,_ = s2s.constructSurface(imgNames,
                          pixelsize=pixelsize, 
                          ZscalingFactor=ZscalingFactor,
                          logFile=None)
-
+if message == "":
+    print("Successfully reconstructed the surface")
+else:
+    print("Error: ", message)
 

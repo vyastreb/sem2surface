@@ -82,9 +82,10 @@ If one wants to reconstruct only main features of the roughness and ignore or sm
 
 ![Reconstructed surface $z(x,y)$ using direct integration](0Surface_DirectIntegration_0.png){#fig:surface}
 
-8. The final step is the removal of the curvature of the surface. This is done by fitting a parabolic surface in principal axes 
+8. The final step is the removal of the curvature of the surface which apparently comes from the deformation of the field of view especially for high zooms. This is done by fitting a parabolic surface in principal axes 
 $$z(x,y) = \frac{x^2}{R_x^2} + \frac{y^2}{R_y^2} + z_0$$ 
 and substracting it from the surface. The curvatures $R_x,R_y$  and the off-set $z_0$ are obtained by the least square fitting procedure.
+This is the key step in the reconstruction procedure which allows us to flip the surface on the correct side (thanks to this curvature) and also to determine whether the order of images provided to the steps 2,3,4 are well ordered. If the resulting curvatures have different signs, the image is still reconstructed but it must be meaningless. A Warning is issued to let the user reorder the images to get a proper reconstruction. For example, if the initial order was $\{A,B,C\}$ it can be reordered as $\{A,C,B\}$.
 
 ## References
 

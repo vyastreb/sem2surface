@@ -19,9 +19,6 @@
 #                                                                           #
 #---------------------------------------------------------------------------#
 
-#TODO: add scaling factor to the GUI
-
-# For GUI
 import tkinter as tk
 from tkinter import Button, Canvas, Label, filedialog
 from PIL import Image, ImageTk
@@ -29,6 +26,19 @@ import os
 import tempfile
 from sem2surface import constructSurface, get_pixel_width, log
 import datetime
+
+# Default values
+default_z_scale = 1.4076e-5
+default_cutoff_frequency = 0.0
+default_reconstruction_mode = "FFT"
+default_use_tiff_pixel_size = True
+default_gauss_filter = False
+default_gauss_sigma = 1.
+default_remove_curvature = True
+default_save_images = False
+default_output_format = "do not save"
+default_timestamp = False
+
 
 def header():
     # printed when running the code
@@ -54,28 +64,32 @@ class SEMto3Dinterface:
 
         # Buttons inside the frame
         self.upload_button = Button(self.left_frame, text="Upload Files", command=self.upload_files)
-        self.upload_button.pack(pady=10)
+        self.upload_button.pack(pady=3)
+
+        # Add reshuffle button
+        self.reshuffle_button = Button(self.left_frame, text="Reshuffle Images", command=self.reshuffle_images, state=tk.DISABLED)
+        self.reshuffle_button.pack(pady=3)
 
         self.run_button = Button(self.left_frame, text="Run 3D constr.", command=self.run, state=tk.DISABLED)  # Initially set to DISABLED
-        self.run_button.pack(pady=10)
+        self.run_button.pack(pady=3)
 
         # Add exit button
         self.exit_button = Button(self.left_frame, text="Exit", command=self.exit_application)
-        self.exit_button.pack(pady=10)
+        self.exit_button.pack(pady=3)
 
         # Add a frame for Z scaling factor input
         self.z_scale_frame = tk.LabelFrame(self.left_frame, text="Z Scaling Factor", padx=5, pady=5)
-        self.z_scale_frame.pack(pady=10, fill="x")
+        self.z_scale_frame.pack(pady=3, fill="x")
 
         # Add an entry for Z scaling factor
         self.z_scale_entry = tk.Entry(self.z_scale_frame)
-        self.z_scale_entry.insert(0, 1e-6)  # Default value
+        self.z_scale_entry.insert(0, default_z_scale)  # Default value
         self.z_scale_entry.pack(fill="x")
 
 
         # Add a frame for output format selection
         self.format_frame = tk.LabelFrame(self.left_frame, text="Output Format", padx=5, pady=5)
-        self.format_frame.pack(pady=10, fill="x")
+        self.format_frame.pack(pady=3, fill="x")
 
         # Variable to store the selected format
         self.output_format = tk.StringVar(value="do not save")  # Default value
@@ -95,7 +109,7 @@ class SEMto3Dinterface:
 
         # Add a frame for FFT cutoff slider
         self.cutoff_frame = tk.LabelFrame(self.left_frame, text="FFT Cutoff", padx=5, pady=5)
-        self.cutoff_frame.pack(pady=10, fill="x")
+        self.cutoff_frame.pack(pady=3, fill="x")
 
         # Add a slider for FFT cutoff percentage
         self.cutoff_slider = tk.Scale(self.cutoff_frame, from_=0, to=100, orient=tk.HORIZONTAL, label="Cutoff (%)")
@@ -103,10 +117,10 @@ class SEMto3Dinterface:
 
         # Add a frame for pixel size input
         self.pixel_size_frame = tk.LabelFrame(self.left_frame, text="Pixel Size (micrometer)", padx=5, pady=5)
-        self.pixel_size_frame.pack(pady=10, fill="x")
+        self.pixel_size_frame.pack(pady=3, fill="x")
 
         # Add a checkbox for using pixel size from TIFF
-        self.use_tiff_pixel_size = tk.BooleanVar(value=True)
+        self.use_tiff_pixel_size = tk.BooleanVar(value=default_use_tiff_pixel_size)
         self.tiff_checkbox = tk.Checkbutton(self.pixel_size_frame, text="From TIFF", variable=self.use_tiff_pixel_size, command=self.toggle_pixel_size_entry)
         self.tiff_checkbox.pack(anchor=tk.W)
 
@@ -116,10 +130,10 @@ class SEMto3Dinterface:
 
         # Add a frame for Reconstruction Mode selection
         self.reconstruction_mode_frame = tk.LabelFrame(self.left_frame, text="Reconstruction Mode", padx=5, pady=5)
-        self.reconstruction_mode_frame.pack(pady=10, fill="x")
+        self.reconstruction_mode_frame.pack(pady=3, fill="x")
 
         # Variable to store the selected reconstruction mode
-        self.reconstruction_mode = tk.StringVar(value="FFT")  # Default value
+        self.reconstruction_mode = tk.StringVar(value=default_reconstruction_mode)  # Default value
 
         # Radio buttons for reconstruction mode selection
         modes = [("FFT", "FFT"), ("Direct Integration", "DirectIntegration")]
@@ -131,40 +145,40 @@ class SEMto3Dinterface:
 
         # Add a frame for Gauss filter
         self.gauss_filter_frame = tk.LabelFrame(self.left_frame, text="Gauss Filter", padx=5, pady=5)
-        self.gauss_filter_frame.pack(pady=10, fill="x")
+        self.gauss_filter_frame.pack(pady=3, fill="x")
 
         # Add a checkbox for Gauss filter
-        self.gauss_filter_enabled = tk.BooleanVar(value=False)
+        self.gauss_filter_enabled = tk.BooleanVar(value=default_gauss_filter)
         self.gauss_filter_checkbox = tk.Checkbutton(self.gauss_filter_frame, text="Enable Gauss Filter", variable=self.gauss_filter_enabled, command=self.toggle_gauss_filter_entry)
         self.gauss_filter_checkbox.pack(anchor=tk.W)
 
         # Add an entry for Gauss filter value
-        self.gauss_filter_value = tk.DoubleVar(value=1.)
+        self.gauss_filter_value = tk.DoubleVar(value=default_gauss_sigma)
         self.gauss_filter_entry = tk.Entry(self.gauss_filter_frame, textvariable=self.gauss_filter_value, state=tk.DISABLED)
         self.gauss_filter_entry.pack(fill="x")
 
         # Add a frame for Remove Curvature option
         self.curvature_frame = tk.LabelFrame(self.left_frame, text="Options", padx=5, pady=5)
-        self.curvature_frame.pack(pady=10, fill="x")
+        self.curvature_frame.pack(pady=3, fill="x")
 
         # Add checkbox to add time stamp to the output file name
-        self.timestamp_enabled = tk.BooleanVar(value=False)
+        self.timestamp_enabled = tk.BooleanVar(value=default_timestamp)
         self.timestamp_checkbox = tk.Checkbutton(self.curvature_frame, text="Add Time Stamp", variable=self.timestamp_enabled)
         self.timestamp_checkbox.pack(anchor=tk.W)
 
         # Add a checkbox for Remove Curvature
-        self.remove_curvature = tk.BooleanVar(value=True)
+        self.remove_curvature = tk.BooleanVar(value=default_remove_curvature)
         self.curvature_checkbox = tk.Checkbutton(self.curvature_frame, text="Remove Curvature", variable=self.remove_curvature)
         self.curvature_checkbox.pack(anchor=tk.W)
 
         # Add a checkbox for "Save images"
-        self.save_images = tk.BooleanVar(value=False)
+        self.save_images = tk.BooleanVar(value=default_save_images)
         self.save_images_checkbox = tk.Checkbutton(self.curvature_frame, text="Save extra images", variable=self.save_images)
         self.save_images_checkbox.pack(anchor=tk.W)
 
         # Create frames for each detector
         detector_frame = tk.Frame(self.root, width=200)  # Set fixed width
-        detector_frame.grid(row=0, column=1, rowspan=5, padx=10, pady=10, sticky=tk.W+tk.E+tk.N+tk.S)    
+        detector_frame.grid(row=0, column=1, rowspan=5, padx=10, pady=3, sticky=tk.W+tk.E+tk.N+tk.S)    
         detector_frame.grid_propagate(False)  # Prevent frame from resizing
 
         # Configure column weights with absolute sizing
@@ -177,12 +191,12 @@ class SEMto3Dinterface:
             frame.pack(pady=5, fill=tk.X)
 
             # Add header label
-            header = tk.Label(frame, text=f"Detector {i+1}", font="Helvetica 12 bold")
-            header.pack(pady=5)
+            header = tk.Label(frame, text=f"Detector {i+1}", font="Helvetica 10 bold")
+            header.pack(pady=2)
 
             # Create a canvas for the image and add to the frame
             canvas = tk.Canvas(frame, width=150, height=100, relief=tk.SUNKEN, borderwidth=1)
-            canvas.pack(pady=5)
+            canvas.pack(pady=2)
             self.detector_canvases.append(canvas)
 
             filename_label = tk.Label(frame, text="", wraplength=150)
@@ -190,10 +204,10 @@ class SEMto3Dinterface:
             self.filename_labels.append(filename_label)
 
             self.canvas = Canvas(root)
-            self.canvas.grid(row=0, column=2, rowspan=5, sticky=tk.W+tk.E+tk.N+tk.S, padx=10, pady=10)
+            self.canvas.grid(row=0, column=2, rowspan=5, sticky=tk.W+tk.E+tk.N+tk.S, padx=10, pady=3)
         # Create a frame for the result canvas with fixed 500px width
         self.result_frame = tk.Frame(self.root, width=500, height=400, relief=tk.SOLID, borderwidth=2)
-        self.result_frame.grid(row=0, column=2, rowspan=5, sticky=tk.W+tk.E+tk.N+tk.S, padx=10, pady=10)
+        self.result_frame.grid(row=0, column=2, rowspan=5, sticky=tk.W+tk.E+tk.N+tk.S, padx=10, pady=3)
         self.result_frame.grid_propagate(False)  # Prevent frame from resizing
         self.result_frame.pack_propagate(False)  # Prevent frame from resizing
 
@@ -204,6 +218,18 @@ class SEMto3Dinterface:
         # Create the result canvas within the result frame
         self.result_canvas = tk.Canvas(self.result_frame, width=500, height=350)
         self.result_canvas.pack(expand=True, fill=tk.BOTH, padx=5, pady=5)
+
+        # Create a frame for the log messages
+        self.log_frame = tk.Frame(self.root, relief=tk.SOLID, borderwidth=2)
+        self.log_frame.grid(row=6, column=0, columnspan=3, sticky=tk.W+tk.E+tk.N+tk.S, padx=10, pady=3)
+
+        # Add header
+        header = tk.Label(self.log_frame, text="Information", font="Helvetica 12 bold")
+        header.pack(pady=3)
+
+        # Add a message box for warnings
+        self.warning_box = tk.Label(self.log_frame, text="", width=150)
+        self.warning_box.pack(pady=5)
 
         self.root.bind('<Configure>', self.on_resize)
         self.after_id = None
@@ -216,6 +242,7 @@ class SEMto3Dinterface:
         for i in range(5):
             self.root.grid_rowconfigure(i, weight=1)
         self.root.grid_rowconfigure(5, weight=0)  # Result row
+
 
     
     
@@ -296,6 +323,88 @@ class SEMto3Dinterface:
             self.result_canvas.create_image((canvas_width - target_width) // 2, (canvas_height - target_height) // 2, anchor=tk.NW, image=result_photo)
             self.result_canvas.image = result_photo  # Keep a reference to avoid garbage collection
 
+    def reshuffle_images(self):
+        if len(self.filepaths) == 3:
+            # Store original paths
+            temp = self.original_filepaths[2]
+            self.original_filepaths[2] = self.original_filepaths[1]
+            self.original_filepaths[1] = temp
+
+            # Also swap temporary filepaths
+            temp = self.filepaths[2]
+            self.filepaths[2] = self.filepaths[1]
+            self.filepaths[1] = temp
+
+        elif len(self.filepaths) == 4:
+            # Rotate images one position forward
+            temp_orig = self.original_filepaths[3]
+            temp = self.filepaths[3]
+            
+            for i in range(3, 0, -1):
+                self.original_filepaths[i] = self.original_filepaths[i-1]
+                self.filepaths[i] = self.filepaths[i-1]
+            
+            self.original_filepaths[0] = temp_orig
+            self.filepaths[0] = temp
+
+            # Swap the last two images
+            temp_orig = self.original_filepaths[3]
+            temp = self.filepaths[3]
+            self.original_filepaths[3] = self.original_filepaths[2]
+            self.filepaths[3] = self.filepaths[2]
+            self.original_filepaths[2] = temp_orig
+            self.filepaths[2] = temp
+
+        elif len(self.filepaths) == 5:
+            # Rotate images one position forward
+            temp_orig = self.original_filepaths[4]
+            temp = self.filepaths[4]
+            
+            for i in range(4, 0, -1):
+                self.original_filepaths[i] = self.original_filepaths[i-1]
+                self.filepaths[i] = self.filepaths[i-1]
+            
+            self.original_filepaths[0] = temp_orig
+            self.filepaths[0] = temp
+
+            # Swap the last two images
+            temp_orig = self.original_filepaths[4]
+            temp = self.filepaths[4]
+            self.original_filepaths[4] = self.original_filepaths[3]
+            self.filepaths[4] = self.filepaths[3]
+            self.original_filepaths[3] = temp_orig
+            self.filepaths[3] = temp
+
+        # Update the display
+        for index, filepath in enumerate(self.filepaths):
+            canvas = self.detector_canvases[index]
+            frame_width = canvas.winfo_width() - 6
+            frame_height = canvas.winfo_height() - 6
+
+            image = Image.open(filepath)
+            aspect_ratio = image.size[0] / image.size[1]
+
+            if aspect_ratio > 1:
+                target_width = frame_width
+                target_height = int(frame_width / aspect_ratio)
+            else:
+                target_height = frame_height 
+                target_width = int(frame_height * aspect_ratio)
+
+            image = image.resize((target_width, target_height))
+            photo = ImageTk.PhotoImage(image)
+            
+            canvas.delete("all")
+            canvas.create_image(frame_width // 2, frame_height // 2, anchor=tk.CENTER, image=photo)
+            self.image_references[index] = photo
+
+        # Update the filename labels with original filenames
+        for index, filepath in enumerate(self.original_filepaths):
+            filename = os.path.basename(filepath)
+            self.filename_labels[index].config(text=filename)
+
+        self.update_images()
+
     def upload_files(self):
         self.filepaths = list(filedialog.askopenfilenames(title="Select up to 5 files", filetypes=[("Image Files", "*.png *.jpg *.jpeg *.gif *.tif")], multiple=True))
         self.original_filepaths = self.filepaths
@@ -347,25 +456,7 @@ class SEMto3Dinterface:
                 canvas.create_image(frame_width // 2, frame_height // 2, anchor=tk.CENTER, image=photo)
                 self.image_references.append(photo)
 
-
-
-
-                # image = Image.open(display_path)
-                # height = 100
-                # width = int(height * image.size[0] / image.size[1])
-                # image = image.resize((width, height))
-                # photo = ImageTk.PhotoImage(image)
-                
-                # # Use the appropriate canvas from the list
-                # canvas = self.detector_canvases[index]
-                # canvas.create_image(75, 50, anchor=tk.CENTER, image=photo)
-                # self.image_references.append(photo)
-            # If a temporary file was used, delete it
-                # if display_path != filepath:
-                #     print(display_path)
-                #     # replace filepath in self.filepaths by display_path
-                #     self.filepaths[index] = display_path
-                #     # os.remove(display_path)                
+               
             except Exception as e:
                 print(f"Error loading image {filepath}: {e}")
 
@@ -373,6 +464,7 @@ class SEMto3Dinterface:
             filename = os.path.basename(filepath)
             self.filename_labels[index].config(text=filename)
 
+        self.reshuffle_button.config(state=tk.NORMAL)
         self.update_images()
 
     def display_reconstruction(self, image_path):
@@ -446,7 +538,7 @@ class SEMto3Dinterface:
         gauss_filter = self.gauss_filter_enabled.get()
         gauss_sigma = self.gauss_filter_value.get() if gauss_filter else 0
 
-        imgName, _, _ ,_ = constructSurface(imgNames, 
+        imgName, _, _ ,_, return_message = constructSurface(imgNames, 
                                    Plot_images_decomposition, 
                                    gauss_filter,  # Use the Gauss filter setting
                                    gauss_sigma,   # Use the Gauss filter value
@@ -459,6 +551,26 @@ class SEMto3Dinterface:
                                    ZscalingFactor=float(self.z_scale_entry.get()),
                                    logFile=logFile)
         self.display_reconstruction(imgName)
+        if return_message != "":
+            warning_window = tk.Toplevel(self.root)
+            warning_window.title("Warning")
+            warning_window.geometry("400x100")
+            warning_window.transient(self.root)  # Make window modal
+            warning_window.grab_set()  # Make window modal
+            
+            # Center the window
+            warning_window.geometry("+%d+%d" % (self.root.winfo_rootx() + 50,
+                                              self.root.winfo_rooty() + 50))
+            
+            # Add warning message
+            message = tk.Label(warning_window, text=return_message, wraplength=350, pady=10)
+            message.pack()
+            
+            # Add OK button
+            ok_button = tk.Button(warning_window, text="Ok", command=warning_window.destroy)
+            ok_button.pack(pady=10)
+        else:
+            self.warning_box.config(text=f"3D surface successfully reconstructed. All information is saved in the log file {logFileName}")
 
 if __name__ == "__main__":
     header()
