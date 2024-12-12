@@ -4,7 +4,7 @@
 
 This repository contains a Python-based solution for 3D surface reconstruction from SEM/BSE images captured using a minimum of three detectors. The methodology leverages the Principal Component Analysis (PCA) of the captured images to discern the principal component images [1]. To reorient gradient images along $x$ and $y$ axes, the Radon transform is used. The final 3D surface, represented as \(z(x,y)\), is derived from its gradients either through the Frankot and Chellappa method [2] (this is the reference method providing the best results) or via direct integration paired with a minimization process between adjacent profiles. 
 
-![3D Surface Reconstruction from milti-detector SEM](explication.png)
+![3D Surface Reconstruction from milti-detector SEM](img/explication.jpg)
 
 For qualitative results, any scaling factor for the vertical axis can be applied to the final surface. However, to get the quantitative results, the scaling factor has to be provided.
 The simplest way to find the scaling factor is to use the Vickers hardness test's imprint as a reference surface for the given SEM and given material. The `fit_Vickers_indenter.py` module enables to find the scaling factor from the Vickers hardness test's imprint.
@@ -93,12 +93,14 @@ The interface is built with Python's Tkinter. The following functions/options ar
 
 ## Examples
 
-![3D Surface Reconstruction from milti-detector SEM](big_surface.png)
+![3D Surface Reconstruction from milti-detector SEM](img/big_surface.jpg)
 ![3D Surface Reconstruction from milti-detector SEM](examples/Surface_1/VTK_view_x10.png)
-![3D Surface Reconstruction from milti-detector SEM](examples/Surface_1/VTK_view_x10.png)
+![3D Surface Reconstruction from milti-detector SEM](examples/Surface_2/VTK_view.png)
 ![3D Surface Reconstruction from Vickers hardness test](examples/Vickers_imprint/VTK_view.png)
 
 ## Acknowledgements
+
+All SEM measurements were obtained by Fabrice Gaslain [(ORCID)](https://orcid.org/0000-0001-5187-1613), CNRS, Mines Paris -PSL, Centre des matériaux, Evry/Paris, France.
 
 The code was developed with the assistance of GPT-4, CoderPad plugin, Copilot in VSCode and Claude 3.5 Sonnet in Cursor.
 
