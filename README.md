@@ -1,4 +1,6 @@
-# `sem2surface` a Tool for 3D Surface Reconstruction from Multi-Detector SEM/BSE Images
+# `sem2surface` a Tool for 3D Surface Reconstruction from Multi-Detector SEM/BSE Images 
+
+**`sem2surface`** &nbsp; ![logo](src/logo.png)
 
 ## Overview
 
@@ -25,15 +27,15 @@ The simplest way to find the scaling factor is to use the Vickers hardness test'
 
 Check that all required packages are installed:
 ```bash
-$ pip install -r requirements.txt
+pip install -r requirements.txt
 ```
 To launch the interface, execute the following command:
-```bash$$
-$ python sem2surface_gui.py
+```bash
+python sem2surface_gui.py
 ```
 To run without GUI, use the following command (do not forget to provide your own images directly in the script):
 ```bash
-$ python test_without_gui.py
+python test_without_gui.py
 ```
 A user has to upload at least three SEM images (supported formats: JPG, PNG, TIFF, BMP) and initiate the reconstruction process by clicking the "3D Reconstruct" button.
 
@@ -97,6 +99,10 @@ The interface is built with Python's Tkinter. The following functions/options ar
 ![3D Surface Reconstruction from milti-detector SEM](examples/Surface_1/VTK_view_x10.png)
 ![3D Surface Reconstruction from milti-detector SEM](examples/Surface_2/VTK_view.png)
 ![3D Surface Reconstruction from Vickers hardness test](examples/Vickers_imprint/VTK_view.png)
+
+## Releases
+
++ [v0.1.0](https://github.com/vyastreb/sem2surface/releases/tag/v0.1.0) - Initial release (Dec 12, 2024)
 
 ## Acknowledgements
 
