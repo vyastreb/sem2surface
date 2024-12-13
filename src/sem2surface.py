@@ -143,7 +143,7 @@ def get_pixel_width(filename):
 # See: R.T. Frankot, R. Chellappa (1988). Method for enforcing integrability in 
 # shape from shading algorithms, IEEE Trans. Pattern Anal. Mach. Intell. 10(4):439-451.
 # #######################################################################################
-def reconstruct_surface_FFT(Gx, Gy, pixelsize, cutoff = 0):
+def reconstruct_surface_FFT(Gx, Gy, cutoff = 0):
     # Fourier transform of the gradients
     Cx = np.fft.fft2(Gx) 
     Cy = np.fft.fft2(Gy) 
@@ -314,7 +314,7 @@ def compute_image_gradients(imgs):
     CorrMatrix = np.zeros((nb_images,nb_images))
     for i in range(nb_images):
         for j in range(nb_images):
-            CorrMatrix[i,j] = np.dot(img_matrix[i], img_matrix[j]) / np.sqrt(np.dot(img_matrix[i], img_matrix[i]) * np.dot(img_matrix[j], img_matrix[j]))
+            CorrMatrix[i,j] = np.dot(img_matrix[i], img_matrix[j]) #/ np.sqrt(np.dot(img_matrix[i], img_matrix[i]) * np.dot(img_matrix[j], img_matrix[j]))
     
     # Perform SVD on the correlation matrix
     U, S, V = np.linalg.svd(CorrMatrix)
@@ -531,7 +531,7 @@ def constructSurface(imgNames,
 # ========================================================= #
         reconstruction_type = ""
         if ReconstructionMode == "FFT":
-            z = reconstruct_surface_FFT(Gx, Gy, pixelsize, cutoff_frequency)
+            z = reconstruct_surface_FFT(Gx, Gy, cutoff_frequency)
             reconstruction_type = "FFT"
         elif ReconstructionMode == "DirectIntegration":
             z = reconstruct_surface_direct_integration(Gx, Gy, pixelsize)

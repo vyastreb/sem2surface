@@ -30,11 +30,11 @@ RemoveCurvature = False # Do not use the default curvature removal, it is adjust
 Time_stamp = False
 Plot_images_decomposition = False
 ZscalingFactor = 1.e-4
-# Indenter parameters
-R = 7 # (micrometers) Radius inside the indenter, should be big enough to include as much of the indenter as possible, but small enough to be kept entirely inside the indenter imprint region
+# Indenter parameters to be defined by the user!
+R = 6 # (micrometers) Radius inside the indenter, should be big enough to include as much of the indenter as possible, but small enough to be kept entirely inside the indenter imprint region
 
 pixelsize = s2s.get_pixel_width(imgNames[0])
-_,X,Y,z = s2s.constructSurface(imgNames, 
+_,X,Y,z,message = s2s.constructSurface(imgNames, 
                          Plot_images_decomposition, 
                          GaussFilter, 
                          sigma, 
@@ -46,6 +46,8 @@ _,X,Y,z = s2s.constructSurface(imgNames,
                          pixelsize=pixelsize, 
                          ZscalingFactor=ZscalingFactor,
                          logFile=None)
+if message != "":
+    print(message)
 
 #  Vicker's indenter pyramid with 136° angle at opposing faces
 #        136°
@@ -55,12 +57,10 @@ _,X,Y,z = s2s.constructSurface(imgNames,
 #         \/
 #
 def VickerIndenter(X,Y,X0,Y0,R,rot,depth,scale):
-    angle = 136 * np.pi / 180.
+    angle = 136 * np.pi / 180. # in radians
     Xprime = (X-X0)*np.cos(rot) - (Y-Y0)*np.sin(rot)
     Yprime = (X-X0)*np.sin(rot) + (Y-Y0)*np.cos(rot)
     Z = np.zeros(X.shape)
-
-    mask = (X-X0)**2 + (Y-Y0)**2 > R**2
 
     # Create masks for each condition
     mask1 = (Xprime >= 0) & (np.abs(Yprime) < Xprime)
@@ -78,14 +78,13 @@ def VickerIndenter(X,Y,X0,Y0,R,rot,depth,scale):
     Z[mask3] += Yprime[mask3] * tan_half
     Z[mask4] -= Yprime[mask4] * tan_half
 
-
+    mask = (X-X0)**2 + (Y-Y0)**2 > R**2
     Z[mask] = np.nan
     Z *= scale
     return Z
 
 # Work in micrometers
 pixelsize *= 1e6
-print("Pixelsize=",pixelsize)
 sign = 1.
 # Find the appropriate scaling for Vicker's imprint
 meanz = np.nanmean(z)
@@ -101,17 +100,6 @@ limx0 = int((X0-R)/pixelsize)
 limx1 = int((X0+R)/pixelsize)
 limy0 = int((Y0-R)/pixelsize)
 limy1 = int((Y0+R)/pixelsize)
-
-xi0 = int((X0i[0] + 4*R)/pixelsize)
-xi1 = int((X0i[0] + 5*R)/pixelsize)
-if xi1 > X.shape[1]*pixelsize:
-    xi1 -= int(R)
-    xi0 -= int(R)
-yi0 = int((Y0i[0] + 4*R)/pixelsize)
-yi1 = int((Y0i[0] + 5*R)/pixelsize)
-if yi1 > Y.shape[0]*pixelsize:
-    yi1 -= int(R)
-    yi0 -= int(R)
 
 rot = 0
 mask = (X-X0)**2 + (Y-Y0)**2 > R**2
@@ -176,16 +164,21 @@ ZscalingFactor /= scale
 print(f"\n===============================\n Scaling factor = {ZscalingFactor:.7e}\n===============================\n")
 
 zind = VickerIndenter(X,Y,X0,Y0,R,rot,depth,1)
+zind -= np.nanmin(zind)
 zp -= np.nanmin(zp)
 # zp *= ZscalingFactor
 zp /= scale
-
+vmin = 0.
+vmax = np.nanmax(zind)
 # Create figure with 3 subplots in one row
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
+# Add general title
+fig.suptitle(f"Vickers' indenter imprint, scaling factor = {ZscalingFactor:.5e}")
 
 # Plot real indenter surface
 im1 = ax1.imshow(zp[limy0:limy1,limx0:limx1], 
-                 extent=[limy0*pixelsize, limy1*pixelsize, limx0*pixelsize, limx1*pixelsize])
+                 extent=[limy0*pixelsize, limy1*pixelsize, limx0*pixelsize, limx1*pixelsize],
+                 vmin=vmin, vmax=vmax, cmap='rainbow')
 ax1.set_title("Real Indenter")
 fig.colorbar(im1, ax=ax1, label=r"$z$, $\mu$m")
 ax1.set_xlabel(r"$x$, $\mu$m")
@@ -194,8 +187,9 @@ ax1.set_ylabel(r"$y$, $\mu$m")
 # Plot ideal indenter surface
 zind_norm = zind[limy0:limy1,limx0:limx1]-np.nanmin(zind)
 im2 = ax2.imshow(zind_norm,
-                 extent=[limy0*pixelsize, limy1*pixelsize, limx0*pixelsize, limx1*pixelsize])
-ax2.set_title(f"Ideal Indenter\nRot = {rot*180/np.pi:.3f}°")
+                 extent=[limy0*pixelsize, limy1*pixelsize, limx0*pixelsize, limx1*pixelsize],
+                 vmin=vmin, vmax=vmax, cmap="rainbow")
+ax2.set_title("Ideal Indenter")
 fig.colorbar(im2, ax=ax2, label=r"$z$, $\mu$m")
 ax2.set_xlabel(r"$x$, $\mu$m")
 ax2.set_ylabel(r"$y$, $\mu$m")
@@ -218,11 +212,12 @@ fig.savefig(f"Indenter_comparison_{ZscalingFactor:.4e}.png", dpi=300)
 
 # ============================================================================ #
 #   Reconstruct the surface with the identified scaling factor and curvatures  #
+#   and check once again the difference between the real and ideal indenters   #
 # ============================================================================ #
 
 print("ZscalingFactor = ",ZscalingFactor)
 pixelsize = s2s.get_pixel_width(imgNames[0])
-_,X,Y,z = s2s.constructSurface(imgNames, 
+_,X,Y,z,message = s2s.constructSurface(imgNames, 
                          Plot_images_decomposition, 
                          GaussFilter, 
                          sigma, 
@@ -234,5 +229,6 @@ _,X,Y,z = s2s.constructSurface(imgNames,
                          pixelsize=pixelsize, 
                          ZscalingFactor=ZscalingFactor,
                          logFile=None)
-
+if message != "":
+    print(message)
 
