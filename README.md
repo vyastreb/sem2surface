@@ -79,6 +79,7 @@ The interface is built with Python's Tkinter. The following functions/options ar
   - `Surface_1/`: Example of the script without GUI.
   - `Surface_2/`: Example of the script without GUI.
   - `Vickers_imprint/`: Example of the script without GUI.
+  - `Vickers_imprint_scaling/`: Example of the procedure to be used to identify scaling based on Vickers' imprint.
 - `requirements.txt`: List of required packages.
 - `README.md`: This file.
 
