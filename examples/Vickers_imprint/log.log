@@ -98,3 +98,38 @@ Surface reconstructed using FFT is saved to Surface_FFT.png
 Surface saved to Surface.vts
 Successfully finished at 2024-12-12 12:34:55
 
+All information is saved to log.log
+Parameters:
+   / Plot intermediate images = True
+   / Gauss filter = False
+   / STD Gauss filter  = 1.0
+   / Remove curvature = True
+   / Reconstruction Mode = FFT
+   / FFT cutoff frequency = 0.0
+   / Output file type = VTK
+   / Time stamp = No
+   / Pixel size = 6.51042e-08 (m)
+   / Z scaling factor per pixel = 217.27243 (1/m)
+   / Z scaling factor = 1.4145347737206e-05 (-)
+Images folder:/home/vyastrebov/ARTICLES/2023/02_SurfaceTopographyChallenge/CODE/examples/Vickers_imprint
+Images names:
+    / Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_A_05.tif
+    / Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_C_05.tif
+    / Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_B_05.tif
+SEM data starts at 1024
+Images decomposition saved to Images_decomposition.png
+   / Radon search: iteration 0 angle_start = 0 angle_end = 180
+   / Radon search: iteration 1 angle_start = 72.0 angle_end = 129.6
+   / Radon search: iteration 2 angle_start = 89.28 angle_end = 108.86399999999999
+   / Radon search: iteration 3 angle_start = 97.11359999999999 angle_end = 103.38047999999999
+   / Radon search: iteration 4 angle_start = 98.993664 angle_end = 101.1244032
+theta1 = 100.05903359999999
+theta2 = 10.059033599999992
+Radon transform RMS saved to RadonTransformRMS.pdf
+Gradients along x and y directions are saved to Gradients.png
+Curvatures were successfully removed: Rx = 2068.84 um, Ry = 1514.56 um, dz = -0.32 um
+The reconstructed surface is flipped.
+Surface reconstructed using FFT is saved to Surface_FFT.png
+Surface saved to Surface.vts
+Successfully finished at 2024-12-13 18:16:20
+

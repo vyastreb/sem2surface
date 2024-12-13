@@ -351,7 +351,7 @@ def constructSurface(imgNames,
                      save_file_type="", 
                      time_stamp=False, 
                      pixelsize=None, 
-                     ZscalingFactor=1.0, 
+                     ZscalingFactorPerPixel=1.0, 
                      logFile=None):
         """
         Construct the surface from the images
@@ -375,9 +375,14 @@ def constructSurface(imgNames,
         log(logFile,"   / Reconstruction Mode = " + str(ReconstructionMode))
         log(logFile,"   / FFT cutoff frequency = " + str(cutoff_frequency))
         log(logFile,"   / Output file type = " + str(save_file_type))
-        log(logFile,"   / Time stamp = " + str(time_stamp)[1:])
-        log(logFile,"   / Pixel size = " + str(pixelsize))
-        log(logFile,"   / Z scaling factor = " + str(ZscalingFactor))
+        if time_stamp:
+            log(logFile,"   / Time stamp = " + str(time_stamp)[1:])
+        else:
+            log(logFile,"   / Time stamp = No")
+        log(logFile,"   / Pixel size = " + str(pixelsize) +" (m)")
+        log(logFile,"   / Z scaling factor per pixel = " + str(ZscalingFactorPerPixel) + " (1/m)")
+        ZscalingFactor = ZscalingFactorPerPixel * pixelsize
+        log(logFile,"   / Z scaling factor = " + str(ZscalingFactor) + " (-)")
 
         # Save the names of the images to the log file
         log(logFile,"Images folder:" + "/".join(imgNames[0].split("/")[:-1]))

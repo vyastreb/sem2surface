@@ -28,7 +28,7 @@ from sem2surface import constructSurface, get_pixel_width, log
 import datetime
 
 # Default values
-default_z_scale = 1.4076e-5
+default_z_scale = 2.1727243e+02
 default_cutoff_frequency = 0.0
 default_reconstruction_mode = "FFT"
 default_use_tiff_pixel_size = True
@@ -78,7 +78,7 @@ class SEMto3Dinterface:
         self.exit_button.pack(pady=3)
 
         # Add a frame for Z scaling factor input
-        self.z_scale_frame = tk.LabelFrame(self.left_frame, text="Z Scaling Factor", padx=5, pady=5)
+        self.z_scale_frame = tk.LabelFrame(self.left_frame, text="Z Scaling Factor/pixel", padx=5, pady=5)
         self.z_scale_frame.pack(pady=3, fill="x")
 
         # Add an entry for Z scaling factor
@@ -548,7 +548,7 @@ class SEMto3Dinterface:
                                    save_file_type=self.output_format.get(),
                                    time_stamp=self.timestamp_enabled.get(),
                                    pixelsize=pixelsize, # put pixelsize in meters
-                                   ZscalingFactor=float(self.z_scale_entry.get()),
+                                   ZscalingFactorPerPixel=float(self.z_scale_entry.get()),
                                    logFile=logFile)
         self.display_reconstruction(imgName)
         if return_message != "":

@@ -100,3 +100,38 @@ Surface reconstructed using FFT is saved to Surface_FFT.png
 Surface saved to Surface.vts
 Successfully finished at 2024-12-12 12:41:29
 
+All information is saved to log.log
+Parameters:
+   / Plot intermediate images = True
+   / Gauss filter = False
+   / STD Gauss filter  = 1.0
+   / Remove curvature = True
+   / Reconstruction Mode = FFT
+   / FFT cutoff frequency = 0.0
+   / Output file type = VTK
+   / Time stamp = No
+   / Pixel size = 3.25521e-07 (m)
+   / Z scaling factor per pixel = 217.27243 (1/m)
+   / Z scaling factor = 7.072673868603e-05 (-)
+Images folder:/home/vyastrebov/ARTICLES/2023/02_SurfaceTopographyChallenge/CODE/examples/Surface_1
+Images names:
+    / P33_scale1_detectorA.tif
+    / P33_scale1_detectorB.tif
+    / P33_scale1_detectorC.tif
+SEM data starts at 1024
+Images decomposition saved to Images_decomposition.png
+   / Radon search: iteration 0 angle_start = 0 angle_end = 180
+   / Radon search: iteration 1 angle_start = 36.0 angle_end = 100.8
+   / Radon search: iteration 2 angle_start = 55.440000000000005 angle_end = 77.47200000000001
+   / Radon search: iteration 3 angle_start = 66.456 angle_end = 73.0656
+   / Radon search: iteration 4 angle_start = 68.43888 angle_end = 70.686144
+theta1 = 70.0119648
+theta2 = 160.0119648
+Radon transform RMS saved to RadonTransformRMS.pdf
+Gradients along x and y directions are saved to Gradients.png
+Curvatures were successfully removed: Rx = 2705.11 um, Ry = 1971.18 um, dz = -6.20 um
+The reconstructed surface is flipped.
+Surface reconstructed using FFT is saved to Surface_FFT.png
+Surface saved to Surface.vts
+Successfully finished at 2024-12-13 18:13:45
+

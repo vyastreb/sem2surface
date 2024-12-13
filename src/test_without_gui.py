@@ -22,7 +22,7 @@
 import os
 import sem2surface as s2s
 
-# Load the data
+# Load your data
 imgNames = ['P33_scale2s1_detectorA.tif',
             'P33_scale2s1_detectorB.tif',
             'P33_scale2s1_detectorC.tif']
@@ -34,10 +34,10 @@ cutoff_frequency = 0.0
 RemoveCurvature = True
 Time_stamp = False
 Plot_images_decomposition = True
-ZscalingFactor = 1.4076e-5
+ZscalingFactorPerPixel = 2.1727243e+02
 
 pixelsize = s2s.get_pixel_width(imgNames[0])
-_,_,_,_,message = s2s.constructSurface(imgNames, 
+imgName,X,Y,Z,message = s2s.constructSurface(imgNames, 
                          Plot_images_decomposition, 
                          GaussFilter, 
                          sigma, 
@@ -47,7 +47,7 @@ _,_,_,_,message = s2s.constructSurface(imgNames,
                          save_file_type="VTK", 
                          time_stamp=Time_stamp, 
                          pixelsize=pixelsize, 
-                         ZscalingFactor=ZscalingFactor,
+                         ZscalingFactorPerPixel=ZscalingFactorPerPixel,
                          logFile=None)
 if message == "":
     print("Successfully reconstructed the surface")

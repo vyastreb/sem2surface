@@ -32,3 +32,38 @@ Surface reconstructed using FFT is saved to Surface_FFT.png
 Surface saved to Surface.vts
 Successfully finished at 2024-12-12 12:23:02
 
+All information is saved to log.log
+Parameters:
+   / Plot intermediate images = True
+   / Gauss filter = False
+   / STD Gauss filter  = 1.0
+   / Remove curvature = True
+   / Reconstruction Mode = FFT
+   / FFT cutoff frequency = 0.0
+   / Output file type = VTK
+   / Time stamp = No
+   / Pixel size = 6.51042e-08 (m)
+   / Z scaling factor per pixel = 217.27243 (1/m)
+   / Z scaling factor = 1.4145347737206e-05 (-)
+Images folder:/home/vyastrebov/ARTICLES/2023/02_SurfaceTopographyChallenge/CODE/examples/Surface_2
+Images names:
+    / P33_scale2s3_detectorA.tif
+    / P33_scale2s3_detectorB.tif
+    / P33_scale2s3_detectorC.tif
+SEM data starts at 1024
+Images decomposition saved to Images_decomposition.png
+   / Radon search: iteration 0 angle_start = 0 angle_end = 180
+   / Radon search: iteration 1 angle_start = 0.0 angle_end = 72.0
+   / Radon search: iteration 2 angle_start = 21.6 angle_end = 46.08
+   / Radon search: iteration 3 angle_start = 28.944000000000003 angle_end = 37.2672
+   / Radon search: iteration 4 angle_start = 30.60864 angle_end = 33.604992
+theta1 = 32.706086400000004
+theta2 = 122.7060864
+Radon transform RMS saved to RadonTransformRMS.pdf
+Gradients along x and y directions are saved to Gradients.png
+WARNING! WARNING! WARNING!
+Warning: Wrong order of images. Image was reconstructed but the results are not reliable. Images should be reordered in a different way: Rx = 6963.88 um, Ry = -364.16 um, dz = 0.45 um
+Surface reconstructed using FFT is saved to Surface_FFT.png
+Surface saved to Surface.vts
+Successfully finished at 2024-12-13 18:14:49
+

@@ -34,7 +34,7 @@ cutoff_frequency = 0.0
 RemoveCurvature = False # Do not use the default curvature removal, it is adjusted for the Vicker's indenter imprint here.
 Time_stamp = False
 Plot_images_decomposition = False
-ZscalingFactor = 1.e-4
+ZscalingFactorPerPixel = 1.
 # Indenter parametersB
 R = 6 # (micrometers) Radius inside the indenter, should be big enough to include as much of the indenter as possible, but small enough to be kept entirely inside the indenter imprint region
 
@@ -49,7 +49,7 @@ _,X,Y,z,message = s2s.constructSurface(imgNames,
                          save_file_type="VTK", 
                          time_stamp=Time_stamp, 
                          pixelsize=pixelsize, 
-                         ZscalingFactor=ZscalingFactor,
+                         ZscalingFactorPerPixel=ZscalingFactorPerPixel,
                          logFile=None)
 if message != "":
     print(message)
@@ -165,9 +165,12 @@ for step in angle_steps:
 
 rot = best_rot
 scale = best_scale
-ZscalingFactor /= scale
+ZscalingFactorPerPixel /= scale
 
-print(f"\n===============================\n Scaling factor = {ZscalingFactor:.7e}\n===============================\n")
+print(f"\n===============================\n \
+      Scaling factor = {ZscalingFactorPerPixel*pixelsize*1e-6:.7e}, pixel size = {pixelsize:.7e} (um)\n \
+      Scaling per pixel = {ZscalingFactorPerPixel:.7e} (1/m) \
+      \n===============================\n")
 
 zind = VickerIndenter(X,Y,X0,Y0,R,rot,depth,1)
 zind -= np.nanmin(zind)
@@ -179,7 +182,7 @@ vmax = np.nanmax(zind)
 # Create figure with 3 subplots in one row
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
 # Add general title
-fig.suptitle(f"Vickers' indenter imprint, scaling factor = {ZscalingFactor:.5e}")
+fig.suptitle(f"Vickers' indenter imprint, scaling factor = {ZscalingFactorPerPixel*pixelsize*1e-6:.5e}, scaling per pixel = {ZscalingFactorPerPixel:.5e} (1/m)")
 
 # Plot real indenter surface
 im1 = ax1.imshow(zp[limy0:limy1,limx0:limx1], 
@@ -214,15 +217,13 @@ im3.set_cmap('coolwarm')
 cbar.set_label(r"Difference, $z_p/\langle z_p \rangle$")
 
 plt.tight_layout()
-fig.savefig(f"Indenter_comparison_{ZscalingFactor:.4e}.png", dpi=300)
+fig.savefig(f"Indenter_comparison_Scaling_{ZscalingFactorPerPixel:.4e}_m_minus_1.png", dpi=300)
 
 # ============================================================================ #
 #   Reconstruct the surface with the identified scaling factor and curvatures  #
 #   and check once again the difference between the real and ideal indenters   #
 # ============================================================================ #
 
-
-print("ZscalingFactor = ",ZscalingFactor)
 pixelsize = s2s.get_pixel_width(imgNames[0])
 _,X,Y,z,message = s2s.constructSurface(imgNames, 
                          Plot_images_decomposition, 
@@ -234,7 +235,7 @@ _,X,Y,z,message = s2s.constructSurface(imgNames,
                          save_file_type="VTK", 
                          time_stamp=False, 
                          pixelsize=pixelsize, 
-                         ZscalingFactor=ZscalingFactor,
+                         ZscalingFactorPerPixel=ZscalingFactorPerPixel, # Since it is the same pixel size, the scaling factor is the same
                          logFile=None)
 if message != "":
     print(message)
@@ -286,6 +287,5 @@ if message != "":
 # cbar = fig.colorbar(im3, ax=ax3, cmap='coolwarm')
 # im3.set_cmap('coolwarm')
 # cbar.set_label(r"Difference, $z_p/\langle z_p \rangle$")
-
 # plt.tight_layout()
-# fig.savefig(f"Posttreatment_Indenter_comparison_{ZscalingFactor:.4e}.png", dpi=300)
+# fig.savefig(f"Posttreatment_Indenter_comparison_Scale_{ZscalingFactorPerPixel:.4e}.png", dpi=300)

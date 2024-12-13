@@ -39,7 +39,7 @@ cutoff_frequency = 0.0
 RemoveCurvature = True
 Time_stamp = False
 Plot_images_decomposition = True
-ZscalingFactor = 1.4076e-5
+ZscalingFactorPerPixel = 2.1727243e+02
 
 pixelsize = s2s.get_pixel_width(imgNames[0])
 _,_,_,_,message = s2s.constructSurface(imgNames, 
@@ -52,7 +52,7 @@ _,_,_,_,message = s2s.constructSurface(imgNames,
                          save_file_type="VTK", 
                          time_stamp=Time_stamp, 
                          pixelsize=pixelsize, 
-                         ZscalingFactor=ZscalingFactor,
+                         ZscalingFactorPerPixel=ZscalingFactorPerPixel,
                          logFile=None)
 if message == "":
     print("Successfully reconstructed the surface")
