@@ -55,6 +55,7 @@ The interface is built with Python's Tkinter. The following functions/options ar
 
 **Options:**
 - **Z Scaling Factor**: The scaling factor for the vertical axis (to be defined, e.g. through the Vickers hardness test's imprint)
+- **Atomic numbers**: The atomic numbers of the reference material (on which the scaling factor is defined) and the current material (on which the current measurement is carried out, use composite atomic numbers for complex materials weighted by mass percentage)
 - **Output Format**: The format of the output file (CSV, VTK, NPZ) or "do not save"
 - **FFT Cutoff**: The cutoff frequency for the FFT reconstruction in percentage of the Nyquist frequency
 - **Pixel Size**: If the pixel size if provided in SEM-generated TIFF files, check the checkbox "From TIFF", otherwise provide the pixel size in m/pixel.

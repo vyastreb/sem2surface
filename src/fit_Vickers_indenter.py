@@ -13,6 +13,11 @@
 #  - Claude 3.5 Sonnet in cursor.                                           #
 #---------------------------------------------------------------------------#
 
+# If working outside the src folder, get the path to the src folder
+# import os
+# import sys
+# src_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
+# sys.path.append(src_path)
 import sem2surface as s2s
 import numpy as np
 import matplotlib.pyplot as plt
@@ -30,7 +35,9 @@ RemoveCurvature = False # Do not use the default curvature removal, it is adjust
 Time_stamp = False
 Plot_images_decomposition = False
 ZscalingFactorPerPixel = 1.
-# Indenter parametersB
+Z_ref = 26 # For steel (main element Fe, Z=26)
+Z_current = 26 # For steel (main element Fe, Z=26)
+# Indenter parameters
 R = 6 # (micrometers) Radius inside the indenter, should be big enough to include as much of the indenter as possible, but small enough to be kept entirely inside the indenter imprint region
 
 pixelsize = s2s.get_pixel_width(imgNames[0])
@@ -45,6 +52,8 @@ _,X,Y,z,message = s2s.constructSurface(imgNames,
                          time_stamp=Time_stamp, 
                          pixelsize=pixelsize, 
                          ZscalingFactorPerPixel=ZscalingFactorPerPixel,
+                         Z_ref=Z_ref,
+                         Z_current=Z_current,
                          logFile=None)
 if message != "":
     print(message)
@@ -231,6 +240,8 @@ _,X,Y,z,message = s2s.constructSurface(imgNames,
                          time_stamp=False, 
                          pixelsize=pixelsize, 
                          ZscalingFactorPerPixel=ZscalingFactorPerPixel, # Since it is the same pixel size, the scaling factor is the same
+                         Z_ref=Z_ref,
+                         Z_current=Z_current,
                          logFile=None)
 if message != "":
     print(message)

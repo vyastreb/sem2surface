@@ -33,11 +33,19 @@ from scipy.optimize import curve_fit
 
 pixelsize0 = 1e-6 # default value in meter, if the user asks to search in the TIF file, but there is no PixelWidth in the TIF file
 
+
 # Configure Matplotlib to use LaTeX for text rendering
 plt.rcParams['font.family'] = 'serif'
 plt.rcParams['font.serif'] = ['Palatino'] 
 plt.rcParams['text.usetex'] = True
 plt.rcParams['text.latex.preamble'] = r'\usepackage{pxfonts}'
+
+# # Backscattering coefficient models from [1] Böngeler, R., Golla, U., Kässens, M., Reimer, L., Schindler, B., Senkel, R. and Spranck, M., 1993. Electron‐specimen interactions in low‐voltage scanning electron microscopy. Scanning, 15(1), pp.1-18. DOI: https://doi.org/10.1002/sca.4950150102
+def backscattering_coefficient(phi, Z):
+    return (1+np.cos(phi*np.pi/180))**(-9/np.sqrt(Z))
+
+def backscattering_coefficient_2(phi, Z):
+    return 0.89*(backscattering_coefficient(0, Z)/0.89)**np.cos(phi*np.pi/180)
 
 def write_vtk(filename, X, Y, z):
     """
@@ -352,6 +360,8 @@ def constructSurface(imgNames,
                      time_stamp=False, 
                      pixelsize=None, 
                      ZscalingFactorPerPixel=1.0, 
+                     Z_ref=None,
+                     Z_current=None,
                      logFile=None):
         """
         Construct the surface from the images
@@ -383,6 +393,18 @@ def constructSurface(imgNames,
         log(logFile,"   / Z scaling factor per pixel = " + str(ZscalingFactorPerPixel) + " (1/m)")
         ZscalingFactor = ZscalingFactorPerPixel * pixelsize
         log(logFile,"   / Z scaling factor = " + str(ZscalingFactor) + " (-)")
+        tilt_sensitivity_factor = 1.0
+        if Z_ref is not None and Z_current is not None:
+            # # Approximate difference in tilt sensitivity between reference material and current material in the interval 0-20 degrees
+            angles = np.linspace(0,20,100)
+            tilt_sensitivity_factor = np.mean(backscattering_coefficient_2(angles, Z_ref) / backscattering_coefficient_2(angles, Z_current))
+            log(logFile,"   / Z_ref = " + str(Z_ref))
+            log(logFile,"   / Z_current = " + str(Z_current))
+            log(logFile,"   / Tilt sensitivity factor = " + str(tilt_sensitivity_factor))
+        else:
+            log(logFile,"   / Z_ref = None")
+            log(logFile,"   / Z_current = None")
+            log(logFile,"   / Tilt sensitivity factor = " + str(tilt_sensitivity_factor))
 
         # Save the names of the images to the log file
         log(logFile,"Images folder:" + "/".join(imgNames[0].split("/")[:-1]))
@@ -547,7 +569,7 @@ def constructSurface(imgNames,
             return None      
 
         # convert to micrometers and scale according to user-defined scaling
-        scalingFactorAndUnits = 1e6 * ZscalingFactor
+        scalingFactorAndUnits = 1e6 * ZscalingFactor * tilt_sensitivity_factor
         z = scalingFactorAndUnits * z 
         n,m = z.shape
         X,Y = np.meshgrid(np.arange(0, m*pixelsize*1e6, pixelsize*1e6), np.arange(0, n*pixelsize*1e6, pixelsize*1e6))
@@ -664,7 +686,11 @@ def constructSurface(imgNames,
 
         now = datetime.datetime.now()
         log(logFile,"Successfully finished at " + now.strftime("%Y-%m-%d %H:%M:%S") + "\n")
+
+        # Save RMS of the surface
+        log(logFile,"RMS of the surface = " + str(np.std(z)))
         logFile.close()
+
 
         return returnImgName, X, Y, z, return_message
 

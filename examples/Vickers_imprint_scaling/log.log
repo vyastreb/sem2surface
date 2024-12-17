@@ -372,3 +372,75 @@ Surface reconstructed using FFT is saved to Surface_FFT.png
 Surface saved to Surface.vts
 Successfully finished at 2024-12-13 18:19:14
 
+All information is saved to log.log
+Parameters:
+   / Plot intermediate images = False
+   / Gauss filter = False
+   / STD Gauss filter  = 1.0
+   / Remove curvature = True
+   / Reconstruction Mode = FFT
+   / FFT cutoff frequency = 0.0
+   / Output file type = VTK
+   / Time stamp = No
+   / Pixel size = 6.51042e-08 (m)
+   / Z scaling factor per pixel = 1.0 (1/m)
+   / Z scaling factor = 6.51042e-08 (-)
+   / Z_ref = 26
+   / Z_current = 26
+   / Tilt sensitivity factor = 1.0
+Images folder:
+Images names:
+    / Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_A_05.tif
+    / Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_C_05.tif
+    / Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_B_05.tif
+SEM data starts at 1024
+   / Radon search: iteration 0 angle_start = 0 angle_end = 180
+   / Radon search: iteration 1 angle_start = 72.0 angle_end = 129.6
+   / Radon search: iteration 2 angle_start = 89.28 angle_end = 108.86399999999999
+   / Radon search: iteration 3 angle_start = 97.11359999999999 angle_end = 103.38047999999999
+   / Radon search: iteration 4 angle_start = 98.993664 angle_end = 101.1244032
+theta1 = 100.05903359999999
+theta2 = 10.059033599999992
+Curvatures were successfully removed: Rx = 412998.44 um, Ry = 292039.42 um, dz = -0.00 um
+The reconstructed surface is flipped.
+Surface reconstructed using FFT is saved to Surface_FFT.png
+Surface saved to Surface.vts
+Successfully finished at 2024-12-17 10:04:56
+
+RMS of the surface = 0.0008105085096845904
+All information is saved to log.log
+Parameters:
+   / Plot intermediate images = False
+   / Gauss filter = False
+   / STD Gauss filter  = 1.0
+   / Remove curvature = True
+   / Reconstruction Mode = FFT
+   / FFT cutoff frequency = 0.0
+   / Output file type = VTK
+   / Time stamp = No
+   / Pixel size = 6.51042e-08 (m)
+   / Z scaling factor per pixel = 217.18094420962112 (1/m)
+   / Z scaling factor = 1.4139391628012014e-05 (-)
+   / Z_ref = 26
+   / Z_current = 26
+   / Tilt sensitivity factor = 1.0
+Images folder:
+Images names:
+    / Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_A_05.tif
+    / Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_C_05.tif
+    / Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_B_05.tif
+SEM data starts at 1024
+   / Radon search: iteration 0 angle_start = 0 angle_end = 180
+   / Radon search: iteration 1 angle_start = 72.0 angle_end = 129.6
+   / Radon search: iteration 2 angle_start = 89.28 angle_end = 108.86399999999999
+   / Radon search: iteration 3 angle_start = 97.11359999999999 angle_end = 103.38047999999999
+   / Radon search: iteration 4 angle_start = 98.993664 angle_end = 101.1244032
+theta1 = 100.05903359999999
+theta2 = 10.059033599999992
+Curvatures were successfully removed: Rx = 2069.73 um, Ry = 1515.13 um, dz = -0.32 um
+The reconstructed surface is flipped.
+Surface reconstructed using FFT is saved to Surface_FFT.png
+Surface saved to Surface.vts
+Successfully finished at 2024-12-17 10:05:06
+
+RMS of the surface = 0.1747515041133719

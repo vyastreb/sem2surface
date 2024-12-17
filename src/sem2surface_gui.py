@@ -38,8 +38,8 @@ default_remove_curvature = True
 default_save_images = False
 default_output_format = "do not save"
 default_timestamp = False
-
-
+default_atomic_number_ref     = 26  # atomic number of the reference material
+default_atomic_number_current = 26  # atomic number of the current material
 def header():
     # printed when running the code
     print("************************************************")
@@ -60,22 +60,22 @@ class SEMto3Dinterface:
         # Load and display the logo inside the frame
         self.logo_image = ImageTk.PhotoImage(Image.open("logo.png"))
         self.logo_label = tk.Label(self.left_frame, image=self.logo_image)
-        self.logo_label.pack(pady=10)
+        self.logo_label.pack(pady=5)
 
         # Buttons inside the frame
         self.upload_button = Button(self.left_frame, text="Upload Files", command=self.upload_files)
-        self.upload_button.pack(pady=3)
+        self.upload_button.pack(pady=1)
 
         # Add reshuffle button
         self.reshuffle_button = Button(self.left_frame, text="Reshuffle Images", command=self.reshuffle_images, state=tk.DISABLED)
-        self.reshuffle_button.pack(pady=3)
+        self.reshuffle_button.pack(pady=1)
 
         self.run_button = Button(self.left_frame, text="Run 3D constr.", command=self.run, state=tk.DISABLED)  # Initially set to DISABLED
-        self.run_button.pack(pady=3)
+        self.run_button.pack(pady=1)
 
         # Add exit button
         self.exit_button = Button(self.left_frame, text="Exit", command=self.exit_application)
-        self.exit_button.pack(pady=3)
+        self.exit_button.pack(pady=1)
 
         # Add a frame for Z scaling factor input
         self.z_scale_frame = tk.LabelFrame(self.left_frame, text="Z Scaling Factor/pixel", padx=5, pady=5)
@@ -86,6 +86,25 @@ class SEMto3Dinterface:
         self.z_scale_entry.insert(0, default_z_scale)  # Default value
         self.z_scale_entry.pack(fill="x")
 
+        # Add atomic number of the reference material and of the current material
+        self.Z_ref_frame = tk.LabelFrame(self.left_frame, text="Atomic numbers", padx=5, pady=5)
+        self.Z_ref_frame.pack(pady=3, fill="x")
+        
+        # Create frame with entry and label for reference Z
+        ref_frame = tk.Frame(self.Z_ref_frame)
+        ref_frame.pack(fill="x")
+        tk.Label(ref_frame, text="Reference Z").pack(side=tk.LEFT)
+        self.Z_ref_entry = tk.Entry(ref_frame)
+        self.Z_ref_entry.insert(0, default_atomic_number_ref)  # Default value
+        self.Z_ref_entry.pack(side=tk.RIGHT, fill="x", expand=True)
+        
+        # Create frame with entry and label for current Z
+        curr_frame = tk.Frame(self.Z_ref_frame)
+        curr_frame.pack(fill="x")
+        tk.Label(curr_frame, text="Current Z").pack(side=tk.LEFT)
+        self.Z_current_entry = tk.Entry(curr_frame)
+        self.Z_current_entry.insert(0, default_atomic_number_current)  # Default value
+        self.Z_current_entry.pack(side=tk.RIGHT, fill="x", expand=True)
 
         # Add a frame for output format selection
         self.format_frame = tk.LabelFrame(self.left_frame, text="Output Format", padx=5, pady=5)
@@ -549,6 +568,8 @@ class SEMto3Dinterface:
                                    time_stamp=self.timestamp_enabled.get(),
                                    pixelsize=pixelsize, # put pixelsize in meters
                                    ZscalingFactorPerPixel=float(self.z_scale_entry.get()),
+                                   Z_ref=float(self.Z_ref_entry.get()),
+                                   Z_current=float(self.Z_current_entry.get()),
                                    logFile=logFile)
         self.display_reconstruction(imgName)
         if return_message != "":

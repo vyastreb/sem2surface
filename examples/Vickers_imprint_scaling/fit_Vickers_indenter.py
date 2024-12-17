@@ -13,8 +13,9 @@
 #  - Claude 3.5 Sonnet in cursor.                                           #
 #---------------------------------------------------------------------------#
 
-import sys
+# If working outside the src folder, get the path to the src folder
 import os
+import sys
 src_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 sys.path.append(src_path)
 import sem2surface as s2s
@@ -22,10 +23,9 @@ import numpy as np
 import matplotlib.pyplot as plt
  
 # Load indentation SEM data, at least 3 images
-folder = os.path.join(os.path.dirname(__file__), "..","Vickers_imprint")
-imgNames = [os.path.join(folder, "Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_A_05.tif"),\
-            os.path.join(folder, "Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_C_05.tif"),\
-            os.path.join(folder, "Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_B_05.tif")]
+imgNames = ["Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_A_05.tif",\
+            "Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_C_05.tif",\
+            "Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_B_05.tif"]
 # Reconstruction parameters
 GaussFilter = False
 sigma = 1.
@@ -35,7 +35,9 @@ RemoveCurvature = False # Do not use the default curvature removal, it is adjust
 Time_stamp = False
 Plot_images_decomposition = False
 ZscalingFactorPerPixel = 1.
-# Indenter parametersB
+Z_ref = 26 # For steel (main element Fe, Z=26)
+Z_current = 26 # For steel (main element Fe, Z=26)
+# Indenter parameters
 R = 6 # (micrometers) Radius inside the indenter, should be big enough to include as much of the indenter as possible, but small enough to be kept entirely inside the indenter imprint region
 
 pixelsize = s2s.get_pixel_width(imgNames[0])
@@ -50,6 +52,8 @@ _,X,Y,z,message = s2s.constructSurface(imgNames,
                          time_stamp=Time_stamp, 
                          pixelsize=pixelsize, 
                          ZscalingFactorPerPixel=ZscalingFactorPerPixel,
+                         Z_ref=Z_ref,
+                         Z_current=Z_current,
                          logFile=None)
 if message != "":
     print(message)
@@ -236,56 +240,8 @@ _,X,Y,z,message = s2s.constructSurface(imgNames,
                          time_stamp=False, 
                          pixelsize=pixelsize, 
                          ZscalingFactorPerPixel=ZscalingFactorPerPixel, # Since it is the same pixel size, the scaling factor is the same
+                         Z_ref=Z_ref,
+                         Z_current=Z_current,
                          logFile=None)
 if message != "":
     print(message)
-
-# For testing needs only, could be uncommented if unsure that the scaling factor is correct
-
-# zind = VickerIndenter(X,Y,X0,Y0,R,best_rot,depth,1)
-# zind -= np.nanmin(zind)
-# zp = z.copy()
-# zp -= np.nanmin(zp)
-# mask = (X-X0)**2 + (Y-Y0)**2 > R**2
-# zp[mask] = np.nan
-# vmax = np.nanmax(zind)
-# vmin = 0.
-# print(f"vmax = {vmax:.3e}, vmin = {vmin:.3e}")
-# pixelsize *= 1e6
-
-# # Create figure with 3 subplots in one row
-# fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
-
-# # Plot real indenter surface
-# im1 = ax1.imshow(zp[limy0:limy1,limx0:limx1], 
-#                  extent=[limy0*pixelsize, limy1*pixelsize, limx0*pixelsize, limx1*pixelsize],
-#                  vmin=vmin, vmax=vmax, cmap='rainbow')
-# ax1.set_title("Real Indenter")
-# fig.colorbar(im1, ax=ax1, label=r"$z$, $\mu$m")
-# ax1.set_xlabel(r"$x$, $\mu$m")
-# ax1.set_ylabel(r"$y$, $\mu$m")
-
-# # Plot ideal indenter surface
-# zind_norm = zind[limy0:limy1,limx0:limx1]-np.nanmin(zind)
-# im2 = ax2.imshow(zind_norm,
-#                  extent=[limy0*pixelsize, limy1*pixelsize, limx0*pixelsize, limx1*pixelsize],
-#                  vmin=vmin, vmax=vmax, cmap='rainbow')
-# ax2.set_title(f"Ideal Indenter\nRot = {rot*180/np.pi:.3f}°")
-# fig.colorbar(im2, ax=ax2, label=r"$z$, $\mu$m")
-# ax2.set_xlabel(r"$x$, $\mu$m")
-# ax2.set_ylabel(r"$y$, $\mu$m")
-
-# # Plot normalized difference
-# diff = (zind_norm-zp[limy0:limy1,limx0:limx1])
-# diff_norm = diff / np.nanmean(zp[limy0:limy1,limx0:limx1])
-# diff_max = 0.9*np.nanmax(diff_norm)
-# diff_min = -diff_max
-# im3 = ax3.imshow(diff_norm,
-#                  extent=[limy0*pixelsize, limy1*pixelsize, limx0*pixelsize, limx1*pixelsize],
-#                  vmin=diff_min, vmax=diff_max)
-# ax3.set_title("Normalized Difference")
-# cbar = fig.colorbar(im3, ax=ax3, cmap='coolwarm')
-# im3.set_cmap('coolwarm')
-# cbar.set_label(r"Difference, $z_p/\langle z_p \rangle$")
-# plt.tight_layout()
-# fig.savefig(f"Posttreatment_Indenter_comparison_Scale_{ZscalingFactorPerPixel:.4e}.png", dpi=300)
