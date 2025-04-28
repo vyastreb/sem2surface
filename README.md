@@ -108,6 +108,10 @@ The interface is built with Python's Tkinter. The following functions/options ar
 
 + [v0.1.0](https://github.com/vyastreb/sem2surface/releases/tag/v0.1.0) - Initial release (Dec 12, 2024)
 
+## Analogues software
+
+A similar technique is available in [Mountains® software by DigitalSurf](https://www.digitalsurf.com/software-solutions/scanning-electron-microscopy), but, of course, it is not free and not open.
+
 ## Acknowledgements
 
 All SEM measurements were obtained by Fabrice Gaslain [(ORCID)](https://orcid.org/0000-0001-5187-1613), CNRS, Mines Paris -PSL, Centre des matériaux, Evry/Paris, France.

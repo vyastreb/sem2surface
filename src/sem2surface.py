@@ -129,22 +129,48 @@ def remove_outside_central_circle(img):
 # Extract pixel size from the tif image file (if it is there)
 def get_pixel_width(filename):
     with open(filename, 'rb') as file:
-        # Go to the end of the file
-        file.seek(-3000, 2)  # Go 200 characters before the end, adjust if needed
+        # Go to the end of the file FIXME: removed this line because some SEMs write metadata in the beginning of the file
+        # file.seek(-3000, 2)  # Go 3000 characters before the end, adjust if needed
         # Read the last part of the file
         content = file.read().decode('ISO-8859-1')
-        
-        # Find the PixelWidth value
-        pixel_width_str = "PixelWidth="
-        start_index = content.find(pixel_width_str)
-        
-        if start_index != -1:
-            start_index += len(pixel_width_str)
-            end_index = content.find('\n', start_index)
-            pixel_width_value = content[start_index:end_index].strip()
-            return float(pixel_width_value)
-        else:
-            return None
+        TAG_PIXEL_WIDTH = ["PixelWidth=", "XResolution=", "ResolutionX=", "Image Pixel Size = "]
+
+        import re
+        for tag in TAG_PIXEL_WIDTH:
+            start_index = content.find(tag)
+            if start_index != -1:
+                start_index += len(tag)
+                end_index = content.find('\n', start_index)
+                pixel_width_value = content[start_index:end_index].strip()
+                print("Tag = " + tag + " Pixel width value = " + pixel_width_value)
+                # Try to extract value and units if present
+                match = re.search(r'(\d+\.?\d*)\s*([a-zA-Zµ]*)?', pixel_width_value)
+                if match:
+                    value = float(match.group(1))
+                    units = match.group(2).lower() if match.group(2) else "m"  # Default to meters if no unit
+                    # Convert to meters based on units
+                    if units in ["nm", "nanometer", "nanometers"]:
+                        return value * 1e-9
+                    elif units in ["um", "µm", "micron", "microns", "micrometer", "micrometers"]:
+                        return value * 1e-6
+                    elif units in ["mm", "millimeter", "millimeters"]:
+                        return value * 1e-3
+                    elif units in ["cm", "centimeter", "centimeters"]:
+                        return value * 1e-2
+                    elif units in ["m", "meter", "meters", ""]:
+                        return value
+                    else:
+                        # If units not recognized, assume meters
+                        return value
+                else:
+                    # If no units found, try to convert the raw value
+                    try:
+                        return float(pixel_width_value)
+                    except ValueError:
+                        continue  # Try next tag
+
+        # If none of the tags matched or value could not be parsed
+        raise ValueError("No pixel width found in the TIF file, introduce it manually in the interface.")
 
 # #######################################################################################
 # Use Frankot and Chellappa method to integrate surface from two gradients
