@@ -611,41 +611,45 @@ def constructSurface(imgNames,
             ZYlin = z[:,0].copy()
             def parabola(x,x0,R,z0):
                 return (x-x0)**2/(2*R) + z0
-            popt, pconv  = curve_fit(parabola, xlin, ZXlin)
-            poptneg, pconvneg  = curve_fit(parabola, xlin, -ZXlin)
-            if popt[1] < poptneg[1]:    
-                Rx = popt[1]
-            else:
-                Rx = -poptneg[1]                
-            popt, pconv  = curve_fit(parabola, ylin, ZYlin)
-            poptneg, pconvneg  = curve_fit(parabola, ylin, -ZYlin)
-            if popt[1] < poptneg[1]:
-                Ry = popt[1]
-            else:
-                Ry = -poptneg[1]
-            Lx = np.max(X[0,:]) - np.min(X[0,:])
-            Ly = np.max(Y[:,0]) - np.min(Y[:,0])
 
-            initial_params = [Rx, Ry, 0.0]
-            result = minimize(objective_function, initial_params,
-                                args=(X, Y, z),
-                                bounds=[(-np.inf, np.inf), (-np.inf, np.inf), (-np.inf, np.inf)])
-            error = objective_function(result.x, X, Y, z)
+            try:
+                popt, pconv  = curve_fit(parabola, xlin, ZXlin)
+                poptneg, pconvneg  = curve_fit(parabola, xlin, -ZXlin)
+                if popt[1] < poptneg[1]:    
+                    Rx = popt[1]
+                else:
+                    Rx = -poptneg[1]                
+                popt, pconv  = curve_fit(parabola, ylin, ZYlin)
+                poptneg, pconvneg  = curve_fit(parabola, ylin, -ZYlin)
+                if popt[1] < poptneg[1]:
+                    Ry = popt[1]
+                else:
+                    Ry = -poptneg[1]
+                Lx = np.max(X[0,:]) - np.min(X[0,:])
+                Ly = np.max(Y[:,0]) - np.min(Y[:,0])
 
-            # Subtract the fitted parabolic surface
-            Rx, Ry, dz = result.x
-            P = parabolic_surface(result.x, X, Y)
-            z -= P
+                initial_params = [Rx, Ry, 0.0]
+                result = minimize(objective_function, initial_params,
+                                    args=(X, Y, z),
+                                    bounds=[(-np.inf, np.inf), (-np.inf, np.inf), (-np.inf, np.inf)])
+                error = objective_function(result.x, X, Y, z)
 
-            if Rx < 0 and Ry < 0:
-                log(logFile, f"Curvature was successfully removed: Rx = {Rx:.2f} um, Ry = {Ry:.2f} um, dz = {dz:.2f} um")
-            elif Rx * Ry < 0:
-                log(logFile, f"WARNING! WARNING! WARNING!\nWarning: Wrong order of images. Image was reconstructed but the results are not reliable. Images should be reordered in a different way: Rx = {Rx:.2f} um, Ry = {Ry:.2f} um, dz = {dz:.2f} um")
-                return_message = "Warning: Wrong order of images. The result is not reliable. Reshuffle images and run again."
-            else: # if both curvatures are negative, the image should be flipped
-                log(logFile, f"Curvatures were successfully removed: Rx = {Rx:.2f} um, Ry = {Ry:.2f} um, dz = {dz:.2f} um")
-                log(logFile, "The reconstructed surface is flipped.")
-                z *= -1
+                # Subtract the fitted parabolic surface
+                Rx, Ry, dz = result.x
+                P = parabolic_surface(result.x, X, Y)
+                z -= P
+
+                if Rx < 0 and Ry < 0:
+                    log(logFile, f"Curvature was successfully removed: Rx = {Rx:.2f} um, Ry = {Ry:.2f} um, dz = {dz:.2f} um")
+                elif Rx * Ry < 0:
+                    log(logFile, f"WARNING! WARNING! WARNING!\nWarning: Wrong order of images. Image was reconstructed but the results are not reliable. Images should be reordered in a different way: Rx = {Rx:.2f} um, Ry = {Ry:.2f} um, dz = {dz:.2f} um")
+                    return_message = "Warning: Wrong order of images. The result is not reliable. Reshuffle images and run again."
+                else: # if both curvatures are negative, the image should be flipped
+                    log(logFile, f"Curvatures were successfully removed: Rx = {Rx:.2f} um, Ry = {Ry:.2f} um, dz = {dz:.2f} um")
+                    log(logFile, "The reconstructed surface is flipped.")
+                    z *= -1
+            except Exception as e:
+                log(logFile, f"Curvature removal skipped due to fitting error: {e}")
 
 #========================================================= #
 #            Plot the reconstructed surface                #
