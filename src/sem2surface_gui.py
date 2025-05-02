@@ -58,9 +58,13 @@ class SEMto3Dinterface:
         self.left_frame.grid(row=0, column=0, padx=10, sticky=tk.N+tk.W+tk.E)
 
         # Load and display the logo inside the frame
-        self.logo_image = ImageTk.PhotoImage(Image.open("logo.png"))
-        self.logo_label = tk.Label(self.left_frame, image=self.logo_image)
-        self.logo_label.pack(pady=5)
+        try:
+            self.logo_image = ImageTk.PhotoImage(Image.open("logo.png"))
+            self.logo_label = tk.Label(self.left_frame, image=self.logo_image)
+            self.logo_label.pack(pady=5)
+        except (FileNotFoundError, IOError):
+            # If logo file is not found, just skip it
+            pass
 
         # Buttons inside the frame
         self.upload_button = Button(self.left_frame, text="Upload Files", command=self.upload_files)
@@ -247,7 +251,7 @@ class SEMto3Dinterface:
         header.pack(pady=3)
 
         # Add a message box for warnings
-        self.warning_box = tk.Label(self.log_frame, text="", width=150)
+        self.warning_box = tk.Label(self.log_frame, text="", width=150, justify=tk.LEFT)
         self.warning_box.pack(pady=5)
 
         self.root.bind('<Configure>', self.on_resize)
@@ -547,11 +551,17 @@ class SEMto3Dinterface:
         logFile = open(logFileName, "a")        
 
         if self.use_tiff_pixel_size.get():
-            pixelsize = get_pixel_width(imgNames[0])
-            log(logFile,"Read from TIF file, Pixel size = " + str(pixelsize)+ " (m)")
+            try:
+                pixelsize = get_pixel_width(imgNames[0])
+                log(logFile,"Read from TIF file, pixel size = " + str(pixelsize)+ " (m)")
+            except ValueError as e:
+                self.warning_box.config(text="", fg="red")  # Reset and set color to red
+                self.warning_box.config(text="Error: Pixel size could not be found in image files, please introduce it manually. The reconstruction stopped.")
+                logFile.close()
+                return
         else:
-            pixelsize = float(self.pixel_size_entry.get()) * 1e-6  # Convert micrometers to meters
-            log(logFile,"Pixel size = " + str(pixelsize)+ " (m)")
+            pixelsize = float(self.pixel_size_entry.get()) 
+            log(logFile,"Manually introduced, pixel size = " + str(pixelsize)+ " (m)")
 
         # Get the Gauss filter settings
         gauss_filter = self.gauss_filter_enabled.get()

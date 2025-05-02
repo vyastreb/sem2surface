@@ -170,7 +170,7 @@ def get_pixel_width(filename):
                         continue  # Try next tag
 
         # If none of the tags matched or value could not be parsed
-        raise ValueError("No pixel width found in the TIF file, introduce it manually in the interface.")
+        raise ValueError("No pixel width found in image files, introduce it manually in the interface.")
 
 # #######################################################################################
 # Use Frankot and Chellappa method to integrate surface from two gradients
@@ -374,6 +374,28 @@ def compute_image_gradients(imgs):
         
     return img1, G1, G2
 
+def convert_to_grayscale(img):
+    """
+    Convert multi-channel image to grayscale if needed.
+    
+    Parameters:
+    -----------
+    img : numpy.ndarray
+        Input image array
+        
+    Returns:
+    --------
+    numpy.ndarray
+        Grayscale image array
+    """
+    if len(img.shape) > 2:
+        # Convert to grayscale using luminance formula
+        if img.shape[2] == 4:  # RGBA
+            # Remove alpha channel first
+            img = img[:, :, :3]
+        # Convert to grayscale using luminance formula
+        return np.dot(img[..., :3], [0.299, 0.587, 0.114])
+    return img
 
 def constructSurface(imgNames, 
                      Plot_images_decomposition, 
@@ -443,6 +465,10 @@ def constructSurface(imgNames,
 #   1.2 If required, filter the images with a Gaussian filter              #
 # ======================================================================== #
         tmp = plt.imread(imgNames[0])
+        # Convert to grayscale if needed
+        if len(tmp.shape) > 2:
+            log(logFile, "Warning: Multi-channel image detected. Converting to grayscale.")
+            tmp = convert_to_grayscale(tmp)
         # Detect first white line in the image
         cutY = tmp.shape[0]
         for i in range(1,tmp.shape[0]):
@@ -453,7 +479,11 @@ def constructSurface(imgNames,
         log(logFile,"SEM data starts at " + str(cutY))
         imgs = np.zeros((3,cutY, tmp.shape[1]))
         for i in range(3):
-            imgs[i] = plt.imread(imgNames[i])[:cutY,:] # removes 
+            img = plt.imread(imgNames[i])
+            # Convert to grayscale if needed
+            if len(img.shape) > 2:
+                img = convert_to_grayscale(img)
+            imgs[i] = img[:cutY,:] # removes 
 
         # Replace nan values with interpolated values
         imgs[0] = np.nan_to_num(imgs[0])
