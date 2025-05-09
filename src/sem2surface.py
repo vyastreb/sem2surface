@@ -29,6 +29,7 @@ from scipy.optimize import minimize
 import vtk
 import datetime
 from scipy.optimize import curve_fit
+from pathlib import Path
 
 
 pixelsize0 = 1e-6 # default value in meter, if the user asks to search in the TIF file, but there is no PixelWidth in the TIF file
@@ -128,7 +129,7 @@ def remove_outside_central_circle(img):
 
 # Extract pixel size from the tif image file (if it is there)
 def get_pixel_width(filename):
-    with open(filename, 'rb') as file:
+    with open(Path(filename), 'rb') as file:
         # Go to the end of the file FIXME: removed this line because some SEMs write metadata in the beginning of the file
         # file.seek(-3000, 2)  # Go 3000 characters before the end, adjust if needed
         # Read the last part of the file
@@ -423,7 +424,7 @@ def constructSurface(imgNames,
             timeStamp = ""
         if logFile is None:
             logFileName = "log" + timeStamp + ".log"
-            logFile = open(logFileName, "a")        
+            logFile = open(Path(logFileName), "a")        
         log(logFile,"All information is saved to " + logFile.name)
         log(logFile,"Parameters:")
         log(logFile,"   / Plot intermediate images = " + str(Plot_images_decomposition))
@@ -464,7 +465,7 @@ def constructSurface(imgNames,
 #   1. Read the images, remove the white line at the bottom of the image   #
 #   1.2 If required, filter the images with a Gaussian filter              #
 # ======================================================================== #
-        tmp = plt.imread(imgNames[0])
+        tmp = plt.imread(Path(imgNames[0]))
         # Convert to grayscale if needed
         if len(tmp.shape) > 2:
             log(logFile, "Warning: Multi-channel image detected. Converting to grayscale.")
@@ -479,7 +480,7 @@ def constructSurface(imgNames,
         log(logFile,"SEM data starts at " + str(cutY))
         imgs = np.zeros((3,cutY, tmp.shape[1]))
         for i in range(3):
-            img = plt.imread(imgNames[i])
+            img = plt.imread(Path(imgNames[i]))
             # Convert to grayscale if needed
             if len(img.shape) > 2:
                 img = convert_to_grayscale(img)
@@ -724,22 +725,21 @@ def constructSurface(imgNames,
         if save_file_type == "CSV":
             filename = "Surface" + timeStamp + ".csv"
             log(logFile,"Surface saved to " + filename)
-            f = open(filename, "w")
-            f.write("# x (um), y (um), z (um)\n")           
-            for i in range(z.shape[0]):
-                for j in range(z.shape[1]):
-                    f.write("{0:.6f},{1:.6f},{2:.6f}\n".format(X[i,j], Y[i,j], z[i,j]))                
+            with open(Path(filename), "w") as f:
+                f.write("# x (um), y (um), z (um)\n")           
+                for i in range(z.shape[0]):
+                    for j in range(z.shape[1]):
+                        f.write("{0:.6f},{1:.6f},{2:.6f}\n".format(X[i,j], Y[i,j], z[i,j]))                
                 # f.write("\n") # if needed for gnuplot, uncomment
-            f.close()
         # Save as npz file
         elif save_file_type == "NPZ":
             filename = "Surface" + timeStamp + ".npz"
-            np.savez(filename, X=X, Y=Y, Z=z)
+            np.savez(Path(filename), X=X, Y=Y, Z=z)
             log(logFile,"Surface saved to " + filename)
         # Save as vts (vtk structured grid) file
         elif save_file_type == "VTK":
             filename = "Surface" + timeStamp + ".vts"
-            write_vtk(filename, X, Y, z)
+            write_vtk(Path(filename), X, Y, z)
             log(logFile,"Surface saved to " + filename)
         else:
             log(logFile,"Surface is not saved")

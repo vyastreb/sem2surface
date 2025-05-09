@@ -26,6 +26,7 @@ import os
 import tempfile
 from sem2surface import constructSurface, get_pixel_width, log
 import datetime
+from pathlib import Path  # Add this import at the top with other imports
 
 # Default values
 default_z_scale = 2.1727243e+02
@@ -59,7 +60,7 @@ class SEMto3Dinterface:
 
         # Load and display the logo inside the frame
         try:
-            self.logo_image = ImageTk.PhotoImage(Image.open("logo.png"))
+            self.logo_image = ImageTk.PhotoImage(Image.open(Path("logo.png")))
             self.logo_label = tk.Label(self.left_frame, image=self.logo_image)
             self.logo_label.pack(pady=5)
         except (FileNotFoundError, IOError):
@@ -291,7 +292,7 @@ class SEMto3Dinterface:
             frame_height = canvas.winfo_height() - 4
 
             # Open the image
-            image = Image.open(filepath)
+            image = Image.open(Path(filepath))
 
             # Calculate the aspect ratio
             aspect_ratio = image.size[0] / image.size[1]
@@ -318,7 +319,7 @@ class SEMto3Dinterface:
          # Update result_canvas
         if hasattr(self, 'result_image_path'):
             # Load the result image
-            result_image = Image.open(self.result_image_path)
+            result_image = Image.open(Path(self.result_image_path))
 
             # Get the canvas dimensions
             canvas_width = self.result_canvas.winfo_width()
@@ -404,7 +405,7 @@ class SEMto3Dinterface:
             frame_width = canvas.winfo_width() - 6
             frame_height = canvas.winfo_height() - 6
 
-            image = Image.open(filepath)
+            image = Image.open(Path(filepath))
             aspect_ratio = image.size[0] / image.size[1]
 
             if aspect_ratio > 1:
@@ -458,7 +459,7 @@ class SEMto3Dinterface:
                 frame_height = canvas.winfo_height() - 6
 
                 # Open the image
-                image = Image.open(display_path)
+                image = Image.open(Path(display_path))
 
                 # Calculate the aspect ratio
                 aspect_ratio = image.size[0] / image.size[1]
@@ -492,7 +493,7 @@ class SEMto3Dinterface:
 
     def display_reconstruction(self, image_path):
         # Load the image
-        image = Image.open(image_path)
+        image = Image.open(Path(image_path))
 
         # Get the canvas dimensions
         canvas_width = self.result_canvas.winfo_width()
