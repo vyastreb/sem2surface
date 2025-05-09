@@ -443,14 +443,6 @@ class SEMto3Dinterface:
 
         # Display all images
         for index, filepath in enumerate(self.filepaths):
-            if filepath.lower().endswith('.tif'):
-                tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
-                os.system(f"convert {filepath} -geometry 25% {tmp_file.name} > /dev/null 2>&1")
-                display_path = tmp_file.name
-                self.filepaths[index] = display_path 
-            else:
-                display_path = filepath
-
             try:
                 # Use the appropriate canvas from the list
                 canvas = self.detector_canvases[index]
@@ -458,9 +450,18 @@ class SEMto3Dinterface:
                 frame_width = canvas.winfo_width() - 6  # Subtracting 2 times the margin (3px on each side)
                 frame_height = canvas.winfo_height() - 6
 
-                # Open the image
-                image = Image.open(Path(display_path))
-
+                # Open and process the image directly with PIL
+                image = Image.open(Path(filepath))
+                
+                # If it's a TIFF file, convert it to RGB mode if needed
+                if filepath.lower().endswith('.tif'):
+                    if image.mode in ('RGBA', 'LA') or (image.mode == 'P' and 'transparency' in image.info):
+                        # Convert to RGB if it has transparency
+                        image = image.convert('RGB')
+                    # Resize to 25% of original size for display
+                    width, height = image.size
+                    image = image.resize((width // 4, height // 4), Image.Resampling.LANCZOS)
+                
                 # Calculate the aspect ratio
                 aspect_ratio = image.size[0] / image.size[1]
 
@@ -475,12 +476,11 @@ class SEMto3Dinterface:
                     target_width = int(frame_height * aspect_ratio)
 
                 # Resize the image
-                image = image.resize((target_width, target_height))
+                image = image.resize((target_width, target_height), Image.Resampling.LANCZOS)
                 photo = ImageTk.PhotoImage(image)                
                 canvas.create_image(frame_width // 2, frame_height // 2, anchor=tk.CENTER, image=photo)
                 self.image_references.append(photo)
 
-               
             except Exception as e:
                 print(f"Error loading image {filepath}: {e}")
 
