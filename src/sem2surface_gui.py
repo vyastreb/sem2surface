@@ -293,6 +293,12 @@ class SEMto3Dinterface:
 
             # Open the image
             image = Image.open(Path(filepath))
+            
+            # Convert image to RGB mode if needed (important for PNG files)
+            if image.mode in ('RGBA', 'LA', 'P', 'I', 'F'):
+                image = image.convert('RGB')
+            elif image.mode != 'RGB':
+                image = image.convert('RGB')
 
             # Calculate the aspect ratio
             aspect_ratio = image.size[0] / image.size[1]
@@ -310,41 +316,15 @@ class SEMto3Dinterface:
             # Resize the image
             image = image.resize((target_width, target_height))
             photo = ImageTk.PhotoImage(image)
-
-            # Update the image on the canvas
+            
+            # Clear the canvas before creating new image
+            canvas.delete("all")
+            
             canvas.create_image(frame_width // 2, frame_height // 2, anchor=tk.CENTER, image=photo)
-            self.image_references.append(photo)  # Update the reference to the new photo image
+            self.image_references.append(photo)
 
-            # Update result_canvas
-            if hasattr(self, 'result_image_path'):
-                # Load the result image
-                result_image = Image.open(Path(self.result_image_path))
-
-                # Get the canvas dimensions
-                canvas_width = self.result_canvas.winfo_width()
-                canvas_height = self.result_canvas.winfo_height()
-
-                # Calculate the aspect ratio of the image
-                aspect_ratio = result_image.size[0] / result_image.size[1]
-
-                # Compute scaling factors for width and height
-                width_scale = canvas_width / result_image.size[0]
-                height_scale = canvas_height / result_image.size[1]
-
-                # Use the smaller of the two scaling factors to ensure the image fits within the canvas
-                scale_factor = min(width_scale, height_scale)
-
-                # Determine the target width and height
-                target_width = int(result_image.size[0] * scale_factor)
-                target_height = int(result_image.size[1] * scale_factor)
-
-                # Resize the image
-                result_image = result_image.resize((target_width, target_height))
-                result_photo = ImageTk.PhotoImage(result_image)
-
-                # Display the image on the canvas
-                self.result_canvas.create_image((canvas_width - target_width) // 2, (canvas_height - target_height) // 2, anchor=tk.NW, image=result_photo)
-                self.result_canvas.image = result_photo  # Keep a reference to avoid garbage collection
+        self.reshuffle_button.config(state=tk.NORMAL)
+        self.update_images()
 
     def reshuffle_images(self):
         if len(self.filepaths) == 3:
@@ -450,18 +430,39 @@ class SEMto3Dinterface:
                 os.system(f"convert {filepath} -geometry 25% {tmp_file.name} > /dev/null 2>&1")
                 display_path = tmp_file.name
                 self.filepaths[index] = display_path 
+            elif filepath.lower().endswith('.png'):
+                # Handle PNG files the same way as TIFF for consistency
+                tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
+                os.system(f"convert {filepath} -geometry 25% {tmp_file.name} > /dev/null 2>&1")
+                display_path = tmp_file.name
+                self.filepaths[index] = display_path 
             else:
                 display_path = filepath
 
             try:
                 # Use the appropriate canvas from the list
                 canvas = self.detector_canvases[index]
+                
+                # Force update to get correct dimensions
+                self.root.update_idletasks()
+                
                 # Get the frame's dimensions
                 frame_width = canvas.winfo_width() - 6  # Subtracting 2 times the margin (3px on each side)
                 frame_height = canvas.winfo_height() - 6
+                
+                # Safety check for canvas dimensions
+                if frame_width <= 0 or frame_height <= 0:
+                    frame_width = 150  # Default width
+                    frame_height = 100  # Default height
 
                 # Open the image
                 image = Image.open(display_path)
+                
+                # Convert image to RGB mode if needed (important for PNG files)
+                if image.mode in ('RGBA', 'LA', 'P', 'I', 'F'):
+                    image = image.convert('RGB')
+                elif image.mode != 'RGB':
+                    image = image.convert('RGB')
 
                 # Calculate the aspect ratio
                 aspect_ratio = image.size[0] / image.size[1]
@@ -478,19 +479,24 @@ class SEMto3Dinterface:
 
                 # Resize the image
                 image = image.resize((target_width, target_height))
-                photo = ImageTk.PhotoImage(image)                
+                photo = ImageTk.PhotoImage(image)
+                
+                # Clear the canvas before creating new image
+                canvas.delete("all")
+                
                 canvas.create_image(frame_width // 2, frame_height // 2, anchor=tk.CENTER, image=photo)
                 self.image_references.append(photo)
 
             except Exception as e:
                 print(f"Error loading image {filepath}: {e}")
+                import traceback
+                traceback.print_exc()  # Print full error traceback
 
             # Update the filename label
             filename = os.path.basename(filepath)
             self.filename_labels[index].config(text=filename)
 
         self.reshuffle_button.config(state=tk.NORMAL)
-        self.update_images()
 
     def display_reconstruction(self, image_path):
         # Load the image
