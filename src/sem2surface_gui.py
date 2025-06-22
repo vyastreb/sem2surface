@@ -316,36 +316,35 @@ class SEMto3Dinterface:
             self.image_references[index] = photo  # Update the reference to the new photo image
 
             # Update result_canvas
-         # Update result_canvas
-        if hasattr(self, 'result_image_path'):
-            # Load the result image
-            result_image = Image.open(Path(self.result_image_path))
+            if hasattr(self, 'result_image_path'):
+                # Load the result image
+                result_image = Image.open(Path(self.result_image_path))
 
-            # Get the canvas dimensions
-            canvas_width = self.result_canvas.winfo_width()
-            canvas_height = self.result_canvas.winfo_height()
+                # Get the canvas dimensions
+                canvas_width = self.result_canvas.winfo_width()
+                canvas_height = self.result_canvas.winfo_height()
 
-            # Calculate the aspect ratio of the image
-            aspect_ratio = result_image.size[0] / result_image.size[1]
+                # Calculate the aspect ratio of the image
+                aspect_ratio = result_image.size[0] / result_image.size[1]
 
-            # Compute scaling factors for width and height
-            width_scale = canvas_width / result_image.size[0]
-            height_scale = canvas_height / result_image.size[1]
+                # Compute scaling factors for width and height
+                width_scale = canvas_width / result_image.size[0]
+                height_scale = canvas_height / result_image.size[1]
 
-            # Use the smaller of the two scaling factors to ensure the image fits within the canvas
-            scale_factor = min(width_scale, height_scale)
+                # Use the smaller of the two scaling factors to ensure the image fits within the canvas
+                scale_factor = min(width_scale, height_scale)
 
-            # Determine the target width and height
-            target_width = int(result_image.size[0] * scale_factor)
-            target_height = int(result_image.size[1] * scale_factor)
+                # Determine the target width and height
+                target_width = int(result_image.size[0] * scale_factor)
+                target_height = int(result_image.size[1] * scale_factor)
 
-            # Resize the image
-            result_image = result_image.resize((target_width, target_height))
-            result_photo = ImageTk.PhotoImage(result_image)
+                # Resize the image
+                result_image = result_image.resize((target_width, target_height))
+                result_photo = ImageTk.PhotoImage(result_image)
 
-            # Display the image on the canvas
-            self.result_canvas.create_image((canvas_width - target_width) // 2, (canvas_height - target_height) // 2, anchor=tk.NW, image=result_photo)
-            self.result_canvas.image = result_photo  # Keep a reference to avoid garbage collection
+                # Display the image on the canvas
+                self.result_canvas.create_image((canvas_width - target_width) // 2, (canvas_height - target_height) // 2, anchor=tk.NW, image=result_photo)
+                self.result_canvas.image = result_photo  # Keep a reference to avoid garbage collection
 
     def reshuffle_images(self):
         if len(self.filepaths) == 3:
