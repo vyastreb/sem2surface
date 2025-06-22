@@ -556,7 +556,11 @@ class SEMto3Dinterface:
         else:
             timeStamp = ""
         logFileName = "log" + timeStamp + ".log"
-        logFile = open(logFileName, "a")        
+        logFile = open(logFileName, "a")
+        
+        log(logFile,"\n" + "="*50)
+        log(logFile,"Reconstruction started at: " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        log(logFile,"="*50)
 
         if self.use_tiff_pixel_size.get():
             try:

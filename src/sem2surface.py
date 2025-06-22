@@ -144,7 +144,19 @@ def get_pixel_width(filename):
                 end_index = content.find('\n', start_index)
                 pixel_width_value = content[start_index:end_index].strip()
                 print("Tag = " + tag + " Pixel width value = " + pixel_width_value)
-                # Try to extract value and units if present
+                
+                # First try to parse as a complete scientific notation number
+                # This handles cases like "1.10243e-006" (which is 1.10243 × 10⁻⁶)
+                scientific_match = re.search(r'(\d+\.?\d*e[+-]?\d+)', pixel_width_value, re.IGNORECASE)
+                if scientific_match:
+                    try:
+                        value = float(scientific_match.group(1))
+                        print(f"Parsed scientific notation: {value} m")
+                        return value
+                    except ValueError:
+                        pass
+                
+                # Try to extract value and units if present (for cases with explicit units)
                 match = re.search(r'(\d+\.?\d*)\s*([a-zA-Zµ]*)?', pixel_width_value)
                 if match:
                     value = float(match.group(1))
