@@ -416,6 +416,9 @@ def constructSurface(imgNames,
                      sigma, 
                      ReconstructionMode,
                      RemoveCurvature=False, 
+                     curvature_mode="automatic",
+                     manual_rx=None,
+                     manual_ry=None,
                      cutoff_frequency=0, 
                      save_file_type="", 
                      time_stamp=False, 
@@ -443,6 +446,11 @@ def constructSurface(imgNames,
         log(logFile,"   / Gauss filter = " + str(GaussFilter))
         log(logFile,"   / STD Gauss filter  = " + str(sigma))
         log(logFile,"   / Remove curvature = " + str(RemoveCurvature))
+        if RemoveCurvature:
+            log(logFile,"   / Curvature mode = " + str(curvature_mode))
+            if curvature_mode == "manual":
+                log(logFile,"   / Manual Rx = " + str(manual_rx) + " (m)")
+                log(logFile,"   / Manual Ry = " + str(manual_ry) + " (m)")
         log(logFile,"   / Reconstruction Mode = " + str(ReconstructionMode))
         log(logFile,"   / FFT cutoff frequency = " + str(cutoff_frequency))
         log(logFile,"   / Output file type = " + str(save_file_type))

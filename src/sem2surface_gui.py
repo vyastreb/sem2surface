@@ -67,20 +67,25 @@ class SEMto3Dinterface:
             # If logo file is not found, just skip it
             pass
 
-        # Buttons inside the frame
-        self.upload_button = Button(self.left_frame, text="Upload Files", command=self.upload_files)
-        self.upload_button.pack(pady=1)
+        # Frame for the main buttons
+        button_frame = tk.Frame(self.left_frame)
+        button_frame.pack(pady=1)
+        
+        # Top row of buttons
+        button_row1 = tk.Frame(button_frame)
+        button_row1.pack()
+        self.upload_button = Button(button_row1, text="Upload Files", command=self.upload_files)
+        self.upload_button.pack(side=tk.LEFT, pady=1, padx=1)
+        self.reshuffle_button = Button(button_row1, text="Reshuffle Images", command=self.reshuffle_images, state=tk.DISABLED)
+        self.reshuffle_button.pack(side=tk.LEFT, pady=1, padx=1)
 
-        # Add reshuffle button
-        self.reshuffle_button = Button(self.left_frame, text="Reshuffle Images", command=self.reshuffle_images, state=tk.DISABLED)
-        self.reshuffle_button.pack(pady=1)
-
-        self.run_button = Button(self.left_frame, text="Run 3D constr.", command=self.run, state=tk.DISABLED)  # Initially set to DISABLED
-        self.run_button.pack(pady=1)
-
-        # Add exit button
-        self.exit_button = Button(self.left_frame, text="Exit", command=self.exit_application)
-        self.exit_button.pack(pady=1)
+        # Bottom row of buttons
+        button_row2 = tk.Frame(button_frame)
+        button_row2.pack()
+        self.run_button = Button(button_row2, text="Run 3D constr.", command=self.run, state=tk.DISABLED)  # Initially set to DISABLED
+        self.run_button.pack(side=tk.LEFT, pady=1, padx=1)
+        self.exit_button = Button(button_row2, text="Exit", command=self.exit_application)
+        self.exit_button.pack(side=tk.LEFT, pady=1, padx=1)
 
         # Add a frame for Z scaling factor input
         self.z_scale_frame = tk.LabelFrame(self.left_frame, text="Z Scaling Factor/pixel", padx=5, pady=5)
@@ -95,21 +100,24 @@ class SEMto3Dinterface:
         self.Z_ref_frame = tk.LabelFrame(self.left_frame, text="Atomic numbers", padx=5, pady=5)
         self.Z_ref_frame.pack(pady=3, fill="x")
         
-        # Create frame with entry and label for reference Z
-        ref_frame = tk.Frame(self.Z_ref_frame)
-        ref_frame.pack(fill="x")
-        tk.Label(ref_frame, text="Reference Z").pack(side=tk.LEFT)
-        self.Z_ref_entry = tk.Entry(ref_frame)
-        self.Z_ref_entry.insert(0, default_atomic_number_ref)  # Default value
-        self.Z_ref_entry.pack(side=tk.RIGHT, fill="x", expand=True)
+        atomic_number_inner_frame = tk.Frame(self.Z_ref_frame)
+        atomic_number_inner_frame.pack(fill="x")
         
-        # Create frame with entry and label for current Z
-        curr_frame = tk.Frame(self.Z_ref_frame)
-        curr_frame.pack(fill="x")
-        tk.Label(curr_frame, text="Current Z").pack(side=tk.LEFT)
-        self.Z_current_entry = tk.Entry(curr_frame)
-        self.Z_current_entry.insert(0, default_atomic_number_current)  # Default value
-        self.Z_current_entry.pack(side=tk.RIGHT, fill="x", expand=True)
+        # A frame for reference Z
+        ref_frame = tk.Frame(atomic_number_inner_frame)
+        ref_frame.pack(side=tk.LEFT, expand=True)
+        tk.Label(ref_frame, text="Reference Z").pack(side=tk.LEFT, padx=(0, 2))
+        self.Z_ref_entry = tk.Entry(ref_frame, width=5)
+        self.Z_ref_entry.insert(0, default_atomic_number_ref)
+        self.Z_ref_entry.pack(side=tk.LEFT)
+        
+        # A frame for current Z
+        curr_frame = tk.Frame(atomic_number_inner_frame)
+        curr_frame.pack(side=tk.LEFT, expand=True, padx=(5, 0))
+        tk.Label(curr_frame, text="Current Z").pack(side=tk.LEFT, padx=(0, 2))
+        self.Z_current_entry = tk.Entry(curr_frame, width=5)
+        self.Z_current_entry.insert(0, default_atomic_number_current)
+        self.Z_current_entry.pack(side=tk.LEFT)
 
         # Add a frame for output format selection
         self.format_frame = tk.LabelFrame(self.left_frame, text="Output Format", padx=5, pady=5)
@@ -118,39 +126,75 @@ class SEMto3Dinterface:
         # Variable to store the selected format
         self.output_format = tk.StringVar(value="do not save")  # Default value
 
-        # Radio buttons for format selection
-        formats = [("CSV", "CSV"), ("NPZ", "NPZ"), ("VTK", "VTK"), ("do not save", "do not save")]
-        for text, value in formats:
-            tk.Radiobutton(self.format_frame, 
+        # Create a frame for the first row of radio buttons
+        format_row1 = tk.Frame(self.format_frame)
+        format_row1.pack(fill="x")
+        
+        # Radio buttons for format selection in a row
+        formats_row1 = [("CSV", "CSV"), ("NPZ", "NPZ"), ("VTK", "VTK")]
+        for text, value in formats_row1:
+            tk.Radiobutton(format_row1, 
                           text=text, 
                           variable=self.output_format, 
-                          value=value).pack(anchor=tk.W)
+                          value=value).pack(side=tk.LEFT, padx=(0, 10))
+
+        # "do not save" on the next row
+        tk.Radiobutton(self.format_frame, 
+                      text="do not save", 
+                      variable=self.output_format, 
+                      value="do not save").pack(anchor=tk.W)
 
         # Create a list to store the canvases for each detector
         self.detector_canvases = []
         self.filename_labels = []
         self.image_references = []
 
+        # --- Combined Frame for FFT and Gauss Filters ---
+        combined_filter_frame = tk.Frame(self.left_frame)
+        combined_filter_frame.pack(pady=3, fill="x")
+
         # Add a frame for FFT cutoff slider
-        self.cutoff_frame = tk.LabelFrame(self.left_frame, text="FFT Cutoff", padx=5, pady=5)
-        self.cutoff_frame.pack(pady=3, fill="x")
+        self.cutoff_frame = tk.LabelFrame(combined_filter_frame, text="FFT Cutoff", padx=5, pady=5)
+        self.cutoff_frame.pack(pady=0, side=tk.LEFT, fill="y", expand=True)
 
         # Add a slider for FFT cutoff percentage
         self.cutoff_slider = tk.Scale(self.cutoff_frame, from_=0, to=100, orient=tk.HORIZONTAL, label="Cutoff (%)")
         self.cutoff_slider.pack(fill="x")
+        
+        # Add a frame for Gauss filter
+        self.gauss_filter_frame = tk.LabelFrame(combined_filter_frame, text="Gauss Filter", padx=5, pady=5)
+        self.gauss_filter_frame.pack(pady=0, side=tk.LEFT, fill="y", padx=(5,0), expand=True)
+
+        # Add a checkbox for Gauss filter
+        self.gauss_filter_enabled = tk.BooleanVar(value=default_gauss_filter)
+        self.gauss_filter_checkbox = tk.Checkbutton(self.gauss_filter_frame, text="Enable", variable=self.gauss_filter_enabled, command=self.toggle_gauss_filter_entry)
+        self.gauss_filter_checkbox.pack(anchor=tk.W)
+
+        # Add an entry for Gauss filter value
+        self.gauss_filter_value = tk.DoubleVar(value=default_gauss_sigma)
+        self.gauss_filter_entry = tk.Entry(self.gauss_filter_frame, textvariable=self.gauss_filter_value, width=10, state=tk.DISABLED)
+        self.gauss_filter_entry.pack(anchor=tk.W)
 
         # Add a frame for pixel size input
         self.pixel_size_frame = tk.LabelFrame(self.left_frame, text="Pixel Size (micrometer)", padx=5, pady=5)
         self.pixel_size_frame.pack(pady=3, fill="x")
 
+        pixel_size_inner_frame = tk.Frame(self.pixel_size_frame)
+        pixel_size_inner_frame.pack(fill=tk.X)
+
         # Add a checkbox for using pixel size from TIFF
         self.use_tiff_pixel_size = tk.BooleanVar(value=default_use_tiff_pixel_size)
-        self.tiff_checkbox = tk.Checkbutton(self.pixel_size_frame, text="From TIFF", variable=self.use_tiff_pixel_size, command=self.toggle_pixel_size_entry)
-        self.tiff_checkbox.pack(anchor=tk.W)
+        self.tiff_checkbox = tk.Checkbutton(pixel_size_inner_frame, text="From TIFF", variable=self.use_tiff_pixel_size, command=self.toggle_pixel_size_entry)
+        self.tiff_checkbox.pack(side=tk.LEFT)
 
+        # Frame for manual entry
+        manual_pixel_frame = tk.Frame(pixel_size_inner_frame)
+        manual_pixel_frame.pack(side=tk.LEFT, padx=(10, 0))
+        
+        tk.Label(manual_pixel_frame, text="manual").pack(side=tk.LEFT, padx=(0, 2))
         # Add an entry for manual pixel size input
-        self.pixel_size_entry = tk.Entry(self.pixel_size_frame, state=tk.DISABLED)
-        self.pixel_size_entry.pack(fill="x")
+        self.pixel_size_entry = tk.Entry(manual_pixel_frame, width=10, state=tk.DISABLED)
+        self.pixel_size_entry.pack(side=tk.LEFT)
 
         # Add a frame for Reconstruction Mode selection
         self.reconstruction_mode_frame = tk.LabelFrame(self.left_frame, text="Reconstruction Mode", padx=5, pady=5)
@@ -159,45 +203,80 @@ class SEMto3Dinterface:
         # Variable to store the selected reconstruction mode
         self.reconstruction_mode = tk.StringVar(value=default_reconstruction_mode)  # Default value
 
+        # Frame to hold radio buttons in a row
+        recon_mode_inner_frame = tk.Frame(self.reconstruction_mode_frame)
+        recon_mode_inner_frame.pack(fill="x")
+        
         # Radio buttons for reconstruction mode selection
         modes = [("FFT", "FFT"), ("Direct Integration", "DirectIntegration")]
         for text, value in modes:
-            tk.Radiobutton(self.reconstruction_mode_frame, 
+            tk.Radiobutton(recon_mode_inner_frame, 
                            text=text, 
                            variable=self.reconstruction_mode, 
-                           value=value).pack(anchor=tk.W)
+                           value=value).pack(side=tk.LEFT)
 
-        # Add a frame for Gauss filter
-        self.gauss_filter_frame = tk.LabelFrame(self.left_frame, text="Gauss Filter", padx=5, pady=5)
-        self.gauss_filter_frame.pack(pady=3, fill="x")
-
-        # Add a checkbox for Gauss filter
-        self.gauss_filter_enabled = tk.BooleanVar(value=default_gauss_filter)
-        self.gauss_filter_checkbox = tk.Checkbutton(self.gauss_filter_frame, text="Enable Gauss Filter", variable=self.gauss_filter_enabled, command=self.toggle_gauss_filter_entry)
-        self.gauss_filter_checkbox.pack(anchor=tk.W)
-
-        # Add an entry for Gauss filter value
-        self.gauss_filter_value = tk.DoubleVar(value=default_gauss_sigma)
-        self.gauss_filter_entry = tk.Entry(self.gauss_filter_frame, textvariable=self.gauss_filter_value, state=tk.DISABLED)
-        self.gauss_filter_entry.pack(fill="x")
-
-        # Add a frame for Remove Curvature option
-        self.curvature_frame = tk.LabelFrame(self.left_frame, text="Options", padx=5, pady=5)
+        # Add a frame for Curvature options
+        self.curvature_frame = tk.LabelFrame(self.left_frame, text="Curvature", padx=5, pady=5)
         self.curvature_frame.pack(pady=3, fill="x")
-
-        # Add checkbox to add time stamp to the output file name
-        self.timestamp_enabled = tk.BooleanVar(value=default_timestamp)
-        self.timestamp_checkbox = tk.Checkbutton(self.curvature_frame, text="Add Time Stamp", variable=self.timestamp_enabled)
-        self.timestamp_checkbox.pack(anchor=tk.W)
 
         # Add a checkbox for Remove Curvature
         self.remove_curvature = tk.BooleanVar(value=default_remove_curvature)
-        self.curvature_checkbox = tk.Checkbutton(self.curvature_frame, text="Remove Curvature", variable=self.remove_curvature)
+        self.curvature_checkbox = tk.Checkbutton(self.curvature_frame, text="Remove curvature", variable=self.remove_curvature, command=self.toggle_curvature_options)
         self.curvature_checkbox.pack(anchor=tk.W)
+
+        # Add curvature mode selection frame
+        self.curvature_mode_frame = tk.Frame(self.curvature_frame)
+        self.curvature_mode_frame.pack(anchor=tk.W, padx=(20, 0))  # Indent the options
+
+        # Variable to store the selected curvature mode
+        self.curvature_mode = tk.StringVar(value="automatic")
+
+        # Radio buttons for curvature mode selection
+        self.automatic_radio = tk.Radiobutton(self.curvature_mode_frame, 
+                                             text="automatic", 
+                                             variable=self.curvature_mode, 
+                                             value="automatic",
+                                             command=self.toggle_manual_curvature_entries,
+                                             state=tk.NORMAL if default_remove_curvature else tk.DISABLED)
+        self.automatic_radio.pack(side=tk.LEFT)
+
+        self.manual_radio = tk.Radiobutton(self.curvature_mode_frame, 
+                                          text="manual", 
+                                          variable=self.curvature_mode, 
+                                          value="manual",
+                                          command=self.toggle_manual_curvature_entries,
+                                          state=tk.NORMAL if default_remove_curvature else tk.DISABLED)
+        self.manual_radio.pack(side=tk.LEFT, padx=(5,0))
+
+        # Add manual curvature parameters frame
+        self.manual_curvature_frame = tk.Frame(self.curvature_frame)
+        self.manual_curvature_frame.pack(anchor=tk.W, padx=(40, 0), fill=tk.X)  # Indent further
+
+        # Rx and Ry entry fields on the same row
+        rx_frame = tk.Frame(self.manual_curvature_frame)
+        rx_frame.pack(side=tk.LEFT, expand=True)
+        tk.Label(rx_frame, text="Rx (m)").pack(side=tk.LEFT, padx=(0,2))
+        self.rx_entry = tk.Entry(rx_frame, width=10, state=tk.DISABLED)
+        self.rx_entry.pack(side=tk.LEFT)
+
+        ry_frame = tk.Frame(self.manual_curvature_frame)
+        ry_frame.pack(side=tk.LEFT, expand=True, padx=(5, 0))
+        tk.Label(ry_frame, text="Ry (m)").pack(side=tk.LEFT, padx=(0,2))
+        self.ry_entry = tk.Entry(ry_frame, width=10, state=tk.DISABLED)
+        self.ry_entry.pack(side=tk.LEFT)
+
+        # Add a frame for Options
+        self.options_frame = tk.LabelFrame(self.left_frame, text="Options", padx=5, pady=5)
+        self.options_frame.pack(pady=3, fill="x")
+
+        # Add checkbox to add time stamp to the output file name
+        self.timestamp_enabled = tk.BooleanVar(value=default_timestamp)
+        self.timestamp_checkbox = tk.Checkbutton(self.options_frame, text="Add Time Stamp", variable=self.timestamp_enabled)
+        self.timestamp_checkbox.pack(anchor=tk.W)
 
         # Add a checkbox for "Save images"
         self.save_images = tk.BooleanVar(value=default_save_images)
-        self.save_images_checkbox = tk.Checkbutton(self.curvature_frame, text="Save extra images", variable=self.save_images)
+        self.save_images_checkbox = tk.Checkbutton(self.options_frame, text="Save extra images", variable=self.save_images)
         self.save_images_checkbox.pack(anchor=tk.W)
 
         # Create frames for each detector
@@ -542,6 +621,34 @@ class SEMto3Dinterface:
         else:
             self.gauss_filter_entry.config(state=tk.DISABLED)
 
+    def toggle_curvature_options(self):
+        """Enable or disable curvature mode options based on the main checkbox"""
+        if self.remove_curvature.get():
+            self.automatic_radio.config(state=tk.NORMAL)
+            self.manual_radio.config(state=tk.NORMAL)
+            
+            # Enable/disable manual parameters based on selected mode
+            if self.curvature_mode.get() == "manual":
+                self.rx_entry.config(state=tk.NORMAL)
+                self.ry_entry.config(state=tk.NORMAL)
+            else:
+                self.rx_entry.config(state=tk.DISABLED)
+                self.ry_entry.config(state=tk.DISABLED)
+        else:
+            self.automatic_radio.config(state=tk.DISABLED)
+            self.manual_radio.config(state=tk.DISABLED)
+            self.rx_entry.config(state=tk.DISABLED)
+            self.ry_entry.config(state=tk.DISABLED)
+
+    def toggle_manual_curvature_entries(self):
+        """Enable or disable manual curvature entries based on mode selection"""
+        if self.remove_curvature.get() and self.curvature_mode.get() == "manual":
+            self.rx_entry.config(state=tk.NORMAL)
+            self.ry_entry.config(state=tk.NORMAL)
+        else:
+            self.rx_entry.config(state=tk.DISABLED)
+            self.ry_entry.config(state=tk.DISABLED)
+
     def run(self):
         imgNames = list(self.original_filepaths)
         # Get the cutoff percentage from the slider
@@ -549,6 +656,12 @@ class SEMto3Dinterface:
 
         # Determine the value of Plot_images_decomposition based on the checkbox
         Plot_images_decomposition = self.save_images.get()
+
+        # Get curvature removal parameters
+        remove_curvature = self.remove_curvature.get()
+        curvature_mode = self.curvature_mode.get() if remove_curvature else "automatic"
+        manual_rx = float(self.rx_entry.get()) if remove_curvature and curvature_mode == "manual" and self.rx_entry.get() else None
+        manual_ry = float(self.ry_entry.get()) if remove_curvature and curvature_mode == "manual" and self.ry_entry.get() else None
 
         # If time stamp is enabled, create a log file
         if self.timestamp_enabled.get():
@@ -584,7 +697,10 @@ class SEMto3Dinterface:
                                    gauss_filter,  # Use the Gauss filter setting
                                    gauss_sigma,   # Use the Gauss filter value
                                    self.reconstruction_mode.get(),  # Use the selected reconstruction mode
-                                   RemoveCurvature = self.remove_curvature.get(),  # Use the Remove Curvature setting
+                                   RemoveCurvature=remove_curvature,  # Use the Remove Curvature setting
+                                   curvature_mode=curvature_mode,  # Add curvature mode
+                                   manual_rx=manual_rx,  # Add manual Rx
+                                   manual_ry=manual_ry,  # Add manual Ry
                                    cutoff_frequency=0.01*cutoff_percentage,
                                    save_file_type=self.output_format.get(),
                                    time_stamp=self.timestamp_enabled.get(),
