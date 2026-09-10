@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+.venv/
+venv/
+*.bak
+
+# Outputs created when running from the repository root.
+/Gradients*.png
+/Images_decomposition*.png
+/RadonTransformRMS*.pdf
+/Surface*.csv
+/Surface*.npz
+/Surface*.png
+/Surface*.vts
+/log*.log
