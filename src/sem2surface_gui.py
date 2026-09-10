@@ -1,739 +1,473 @@
-#---------------------------------------------------------------------------#
-#                                                                           #
-# SEM/BSE 3D surface reconstruction: 1. GUI part                            #
-#                                                                           #
-# Reconstructor for 3D surface from SEM images from                         #
-# at least 3 BSE detectors without knowledge of their orientation           #
-#                                                                           #
-# The reconstruction relies on SVD-PCA extraction, Radon transform          #
-# and Frankot-Chellappa FFT-based reconstruction technique or               #
-# direct integration from dz/dx and dz/dy gradients                         #
-#                                                                           #                          
-# V.A. Yastrebov, CNRS, MINES Paris, Aug 2023-Dec 2024                      #
-# Licence: BSD 3-Clause                                                     #
-#                                                                           #
-# Aided by :                                                                #
-#  - GPT4 with CoderPad plugin                                              #
-#  - Copilot in VSCode                                                      #
-#  - Claude 3.5 Sonnet in cursor.                                           #
-#                                                                           #
-#---------------------------------------------------------------------------#
+"""Tkinter interface for sem2surface."""
 
+from __future__ import annotations
+
+import queue
+import threading
 import tkinter as tk
-from tkinter import Button, Canvas, Label, filedialog
-from PIL import Image, ImageTk
-import os
-import tempfile
-from sem2surface import constructSurface, get_pixel_width, log
-import datetime
-from pathlib import Path  # Add this import at the top with other imports
+from pathlib import Path
+from tkinter import filedialog, messagebox
 
-# Default values
-default_z_scale = 2.1727243e+02
-default_cutoff_frequency = 0.0
-default_reconstruction_mode = "FFT"
-default_use_tiff_pixel_size = True
-default_gauss_filter = False
-default_gauss_sigma = 1.
-default_remove_curvature = True
-default_save_images = False
-default_output_format = "do not save"
-default_timestamp = False
-default_atomic_number_ref     = 26  # atomic number of the reference material
-default_atomic_number_current = 26  # atomic number of the current material
-def header():
-    # printed when running the code
+import numpy as np
+from PIL import Image, ImageTk
+
+from sem2surface import construct_surface, get_pixel_width
+
+
+DEFAULT_Z_SCALE = 2.1727243e2
+DEFAULT_GAUSSIAN_SIGMA = 1.0
+
+
+def _prepare_preview_image(source: Image.Image) -> Image.Image:
+    """Return an 8-bit RGB image suitable for display by Tk.
+
+    Pillow clips ``I;16`` SEM images when they are converted directly to RGB.
+    Normalizing the finite data range first preserves their visible contrast.
+    """
+    if source.mode == "F" or source.mode == "I" or source.mode.startswith("I;16"):
+        pixels = np.asarray(source, dtype=np.float64)
+        finite = np.isfinite(pixels)
+        preview = np.zeros(pixels.shape, dtype=np.uint8)
+        if finite.any():
+            minimum = float(pixels[finite].min())
+            maximum = float(pixels[finite].max())
+            if maximum > minimum:
+                scaled = (pixels[finite] - minimum) * (255.0 / (maximum - minimum))
+                preview[finite] = np.clip(scaled, 0, 255).astype(np.uint8)
+        return Image.fromarray(preview, mode="L").convert("RGB")
+    return source.convert("RGB")
+
+
+def header() -> None:
     print("************************************************")
     print("*      SEM/BSE 3D surface reconstruction       *")
     print("************************************************")
 
+
 class SEMto3Dinterface:
-    def __init__(self, root):
-        # Improved and cleaned up version of the init method
+    """Desktop interface for reconstruction from three to five images."""
+
+    def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("SEM-BEM 3D surface reconstruction")
-        self.filepaths = []  
+        self.root.title("SEM/BSE 3D surface reconstruction")
+        self.root.minsize(980, 720)
+        self.root.protocol("WM_DELETE_WINDOW", self.exit_application)
 
-        # Create a frame to group the logo and buttons
-        self.left_frame = tk.Frame(root)
-        self.left_frame.grid(row=0, column=0, padx=10, sticky=tk.N+tk.W+tk.E)
+        self.filepaths: list[Path] = []
+        self.image_references: list[ImageTk.PhotoImage | None] = [None] * 5
+        self.after_id: str | None = None
+        self.worker: threading.Thread | None = None
+        self.worker_results: queue.Queue[tuple[str, object]] = queue.Queue()
 
-        # Load and display the logo inside the frame
-        try:
-            self.logo_image = ImageTk.PhotoImage(Image.open(Path("logo.png")))
-            self.logo_label = tk.Label(self.left_frame, image=self.logo_image)
-            self.logo_label.pack(pady=5)
-        except (FileNotFoundError, IOError):
-            # If logo file is not found, just skip it
-            pass
+        self._build_controls()
+        self._build_detector_panel()
+        self._build_result_panel()
+        self._build_information_panel()
 
-        # Frame for the main buttons
+        self.root.grid_columnconfigure(2, weight=1)
+        self.root.grid_rowconfigure(0, weight=1)
+        self.root.bind("<Configure>", self.on_resize)
+
+    def _build_controls(self) -> None:
+        self.left_frame = tk.Frame(self.root)
+        self.left_frame.grid(row=0, column=0, padx=10, pady=5, sticky="ns")
+
         button_frame = tk.Frame(self.left_frame)
-        button_frame.pack(pady=1)
-        
-        # Top row of buttons
-        button_row1 = tk.Frame(button_frame)
-        button_row1.pack()
-        self.upload_button = Button(button_row1, text="Upload Files", command=self.upload_files)
-        self.upload_button.pack(side=tk.LEFT, pady=1, padx=1)
-        self.reshuffle_button = Button(button_row1, text="Reshuffle Images", command=self.reshuffle_images, state=tk.DISABLED)
-        self.reshuffle_button.pack(side=tk.LEFT, pady=1, padx=1)
+        button_frame.pack(pady=2)
+        self.upload_button = tk.Button(
+            button_frame, text="Upload Files", command=self.upload_files
+        )
+        self.upload_button.grid(row=0, column=0, padx=2, pady=2)
+        self.reshuffle_button = tk.Button(
+            button_frame,
+            text="Reshuffle Images",
+            command=self.reshuffle_images,
+            state=tk.DISABLED,
+        )
+        self.reshuffle_button.grid(row=0, column=1, padx=2, pady=2)
+        self.run_button = tk.Button(
+            button_frame, text="Run 3D reconstruction", command=self.run, state=tk.DISABLED
+        )
+        self.run_button.grid(row=1, column=0, padx=2, pady=2)
+        self.exit_button = tk.Button(
+            button_frame, text="Exit", command=self.exit_application
+        )
+        self.exit_button.grid(row=1, column=1, padx=2, pady=2)
 
-        # Bottom row of buttons
-        button_row2 = tk.Frame(button_frame)
-        button_row2.pack()
-        self.run_button = Button(button_row2, text="Run 3D constr.", command=self.run, state=tk.DISABLED)  # Initially set to DISABLED
-        self.run_button.pack(side=tk.LEFT, pady=1, padx=1)
-        self.exit_button = Button(button_row2, text="Exit", command=self.exit_application)
-        self.exit_button.pack(side=tk.LEFT, pady=1, padx=1)
-
-        # Add a frame for Z scaling factor input
-        self.z_scale_frame = tk.LabelFrame(self.left_frame, text="Z Scaling Factor/pixel", padx=5, pady=5)
-        self.z_scale_frame.pack(pady=3, fill="x")
-
-        # Add an entry for Z scaling factor
-        self.z_scale_entry = tk.Entry(self.z_scale_frame)
-        self.z_scale_entry.insert(0, default_z_scale)  # Default value
+        scale_frame = tk.LabelFrame(
+            self.left_frame, text="Z scaling factor per pixel (1/m)", padx=5, pady=5
+        )
+        scale_frame.pack(pady=3, fill="x")
+        self.z_scale_entry = tk.Entry(scale_frame)
+        self.z_scale_entry.insert(0, str(DEFAULT_Z_SCALE))
         self.z_scale_entry.pack(fill="x")
 
-        # Add atomic number of the reference material and of the current material
-        self.Z_ref_frame = tk.LabelFrame(self.left_frame, text="Atomic numbers", padx=5, pady=5)
-        self.Z_ref_frame.pack(pady=3, fill="x")
-        
-        atomic_number_inner_frame = tk.Frame(self.Z_ref_frame)
-        atomic_number_inner_frame.pack(fill="x")
-        
-        # A frame for reference Z
-        ref_frame = tk.Frame(atomic_number_inner_frame)
-        ref_frame.pack(side=tk.LEFT, expand=True)
-        tk.Label(ref_frame, text="Reference Z").pack(side=tk.LEFT, padx=(0, 2))
-        self.Z_ref_entry = tk.Entry(ref_frame, width=5)
-        self.Z_ref_entry.insert(0, default_atomic_number_ref)
-        self.Z_ref_entry.pack(side=tk.LEFT)
-        
-        # A frame for current Z
-        curr_frame = tk.Frame(atomic_number_inner_frame)
-        curr_frame.pack(side=tk.LEFT, expand=True, padx=(5, 0))
-        tk.Label(curr_frame, text="Current Z").pack(side=tk.LEFT, padx=(0, 2))
-        self.Z_current_entry = tk.Entry(curr_frame, width=5)
-        self.Z_current_entry.insert(0, default_atomic_number_current)
-        self.Z_current_entry.pack(side=tk.LEFT)
+        format_frame = tk.LabelFrame(
+            self.left_frame, text="Output", padx=5, pady=5
+        )
+        format_frame.pack(pady=3, fill="x")
+        self.output_format = tk.StringVar(value="do not save")
+        format_row = tk.Frame(format_frame)
+        format_row.pack(fill="x")
+        for label, value in (
+            ("CSV", "CSV"),
+            ("NPZ", "NPZ"),
+            ("VTK", "VTK"),
+            ("do not save", "do not save"),
+        ):
+            tk.Radiobutton(
+                format_row, text=label, variable=self.output_format, value=value
+            ).pack(side=tk.LEFT, padx=(0, 7))
 
-        # Add a frame for output format selection
-        self.format_frame = tk.LabelFrame(self.left_frame, text="Output Format", padx=5, pady=5)
-        self.format_frame.pack(pady=3, fill="x")
+        self.output_directory = tk.StringVar(value=str(Path.cwd()))
+        folder_row = tk.Frame(format_frame)
+        folder_row.pack(fill="x", pady=(5, 0))
+        tk.Button(folder_row, text="Output folder...", command=self.choose_output_folder).pack(
+            side=tk.LEFT
+        )
+        self.output_directory_label = tk.Label(
+            folder_row,
+            text=self._short_path(Path(self.output_directory.get())),
+            anchor="w",
+            width=24,
+        )
+        self.output_directory_label.pack(side=tk.LEFT, padx=(5, 0), fill="x", expand=True)
 
-        # Variable to store the selected format
-        self.output_format = tk.StringVar(value="do not save")  # Default value
-
-        # Create a frame for the first row of radio buttons
-        format_row1 = tk.Frame(self.format_frame)
-        format_row1.pack(fill="x")
-        
-        # Radio buttons for format selection in a row
-        formats_row1 = [("CSV", "CSV"), ("NPZ", "NPZ"), ("VTK", "VTK")]
-        for text, value in formats_row1:
-            tk.Radiobutton(format_row1, 
-                          text=text, 
-                          variable=self.output_format, 
-                          value=value).pack(side=tk.LEFT, padx=(0, 10))
-
-        # "do not save" on the next row
-        tk.Radiobutton(self.format_frame, 
-                      text="do not save", 
-                      variable=self.output_format, 
-                      value="do not save").pack(anchor=tk.W)
-
-        # Create a list to store the canvases for each detector
-        self.detector_canvases = []
-        self.filename_labels = []
-        self.image_references = []
-
-        # --- Combined Frame for FFT and Gauss Filters ---
-        combined_filter_frame = tk.Frame(self.left_frame)
-        combined_filter_frame.pack(pady=3, fill="x")
-
-        # Add a frame for FFT cutoff slider
-        self.cutoff_frame = tk.LabelFrame(combined_filter_frame, text="FFT Cutoff", padx=5, pady=5)
-        self.cutoff_frame.pack(pady=0, side=tk.LEFT, fill="y", expand=True)
-
-        # Add a slider for FFT cutoff percentage
-        self.cutoff_slider = tk.Scale(self.cutoff_frame, from_=0, to=100, orient=tk.HORIZONTAL, label="Cutoff (%)")
+        filters = tk.Frame(self.left_frame)
+        filters.pack(pady=3, fill="x")
+        cutoff_frame = tk.LabelFrame(filters, text="FFT cutoff", padx=5, pady=5)
+        cutoff_frame.pack(side=tk.LEFT, fill="both", expand=True)
+        self.cutoff_slider = tk.Scale(
+            cutoff_frame, from_=0, to=100, orient=tk.HORIZONTAL, label="Cutoff (%)"
+        )
         self.cutoff_slider.pack(fill="x")
-        
-        # Add a frame for Gauss filter
-        self.gauss_filter_frame = tk.LabelFrame(combined_filter_frame, text="Gauss Filter", padx=5, pady=5)
-        self.gauss_filter_frame.pack(pady=0, side=tk.LEFT, fill="y", padx=(5,0), expand=True)
 
-        # Add a checkbox for Gauss filter
-        self.gauss_filter_enabled = tk.BooleanVar(value=default_gauss_filter)
-        self.gauss_filter_checkbox = tk.Checkbutton(self.gauss_filter_frame, text="Enable", variable=self.gauss_filter_enabled, command=self.toggle_gauss_filter_entry)
-        self.gauss_filter_checkbox.pack(anchor=tk.W)
+        gaussian_frame = tk.LabelFrame(filters, text="Gaussian filter", padx=5, pady=5)
+        gaussian_frame.pack(side=tk.LEFT, fill="both", expand=True, padx=(5, 0))
+        self.gaussian_enabled = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            gaussian_frame,
+            text="Enable",
+            variable=self.gaussian_enabled,
+            command=self.toggle_gaussian_entry,
+        ).pack(anchor="w")
+        self.gaussian_sigma = tk.DoubleVar(value=DEFAULT_GAUSSIAN_SIGMA)
+        self.gaussian_entry = tk.Entry(
+            gaussian_frame, textvariable=self.gaussian_sigma, width=10, state=tk.DISABLED
+        )
+        self.gaussian_entry.pack(anchor="w")
 
-        # Add an entry for Gauss filter value
-        self.gauss_filter_value = tk.DoubleVar(value=default_gauss_sigma)
-        self.gauss_filter_entry = tk.Entry(self.gauss_filter_frame, textvariable=self.gauss_filter_value, width=10, state=tk.DISABLED)
-        self.gauss_filter_entry.pack(anchor=tk.W)
-
-        # Add a frame for pixel size input
-        self.pixel_size_frame = tk.LabelFrame(self.left_frame, text="Pixel Size (micrometer)", padx=5, pady=5)
-        self.pixel_size_frame.pack(pady=3, fill="x")
-
-        pixel_size_inner_frame = tk.Frame(self.pixel_size_frame)
-        pixel_size_inner_frame.pack(fill=tk.X)
-
-        # Add a checkbox for using pixel size from TIFF
-        self.use_tiff_pixel_size = tk.BooleanVar(value=default_use_tiff_pixel_size)
-        self.tiff_checkbox = tk.Checkbutton(pixel_size_inner_frame, text="From TIFF", variable=self.use_tiff_pixel_size, command=self.toggle_pixel_size_entry)
-        self.tiff_checkbox.pack(side=tk.LEFT)
-
-        # Frame for manual entry
-        manual_pixel_frame = tk.Frame(pixel_size_inner_frame)
-        manual_pixel_frame.pack(side=tk.LEFT, padx=(10, 0))
-        
-        tk.Label(manual_pixel_frame, text="manual").pack(side=tk.LEFT, padx=(0, 2))
-        # Add an entry for manual pixel size input
-        self.pixel_size_entry = tk.Entry(manual_pixel_frame, width=10, state=tk.DISABLED)
+        pixel_frame = tk.LabelFrame(
+            self.left_frame, text="Pixel size (micrometres)", padx=5, pady=5
+        )
+        pixel_frame.pack(pady=3, fill="x")
+        pixel_row = tk.Frame(pixel_frame)
+        pixel_row.pack(fill="x")
+        self.use_tiff_pixel_size = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            pixel_row,
+            text="From TIFF",
+            variable=self.use_tiff_pixel_size,
+            command=self.toggle_pixel_size_entry,
+        ).pack(side=tk.LEFT)
+        tk.Label(pixel_row, text="manual").pack(side=tk.LEFT, padx=(10, 2))
+        self.pixel_size_entry = tk.Entry(pixel_row, width=12, state=tk.DISABLED)
         self.pixel_size_entry.pack(side=tk.LEFT)
 
-        # Add a frame for Reconstruction Mode selection
-        self.reconstruction_mode_frame = tk.LabelFrame(self.left_frame, text="Reconstruction Mode", padx=5, pady=5)
-        self.reconstruction_mode_frame.pack(pady=3, fill="x")
-
-        # Variable to store the selected reconstruction mode
-        self.reconstruction_mode = tk.StringVar(value=default_reconstruction_mode)  # Default value
-
-        # Frame to hold radio buttons in a row
-        recon_mode_inner_frame = tk.Frame(self.reconstruction_mode_frame)
-        recon_mode_inner_frame.pack(fill="x")
-        
-        # Radio buttons for reconstruction mode selection
-        modes = [("FFT", "FFT"), ("Direct Integration", "DirectIntegration")]
-        for text, value in modes:
-            tk.Radiobutton(recon_mode_inner_frame, 
-                           text=text, 
-                           variable=self.reconstruction_mode, 
-                           value=value).pack(side=tk.LEFT)
-
-        # Add a frame for Curvature options
-        self.curvature_frame = tk.LabelFrame(self.left_frame, text="Curvature", padx=5, pady=5)
-        self.curvature_frame.pack(pady=3, fill="x")
-
-        # Add a checkbox for Remove Curvature
-        self.remove_curvature = tk.BooleanVar(value=default_remove_curvature)
-        self.curvature_checkbox = tk.Checkbutton(self.curvature_frame, text="Remove curvature", variable=self.remove_curvature, command=self.toggle_curvature_options)
-        self.curvature_checkbox.pack(anchor=tk.W)
-
-        # Add curvature mode selection frame
-        self.curvature_mode_frame = tk.Frame(self.curvature_frame)
-        self.curvature_mode_frame.pack(anchor=tk.W, padx=(20, 0))  # Indent the options
-
-        # Variable to store the selected curvature mode
+        curvature_frame = tk.LabelFrame(
+            self.left_frame, text="Curvature", padx=5, pady=5
+        )
+        curvature_frame.pack(pady=3, fill="x")
+        self.remove_curvature = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            curvature_frame,
+            text="Remove curvature",
+            variable=self.remove_curvature,
+            command=self.toggle_curvature_options,
+        ).pack(anchor="w")
         self.curvature_mode = tk.StringVar(value="automatic")
-
-        # Radio buttons for curvature mode selection
-        self.automatic_radio = tk.Radiobutton(self.curvature_mode_frame, 
-                                             text="automatic", 
-                                             variable=self.curvature_mode, 
-                                             value="automatic",
-                                             command=self.toggle_manual_curvature_entries,
-                                             state=tk.NORMAL if default_remove_curvature else tk.DISABLED)
+        mode_row = tk.Frame(curvature_frame)
+        mode_row.pack(anchor="w", padx=(20, 0))
+        self.automatic_radio = tk.Radiobutton(
+            mode_row,
+            text="automatic",
+            variable=self.curvature_mode,
+            value="automatic",
+            command=self.toggle_manual_curvature_entries,
+        )
         self.automatic_radio.pack(side=tk.LEFT)
+        self.manual_radio = tk.Radiobutton(
+            mode_row,
+            text="manual",
+            variable=self.curvature_mode,
+            value="manual",
+            command=self.toggle_manual_curvature_entries,
+        )
+        self.manual_radio.pack(side=tk.LEFT)
 
-        self.manual_radio = tk.Radiobutton(self.curvature_mode_frame, 
-                                          text="manual", 
-                                          variable=self.curvature_mode, 
-                                          value="manual",
-                                          command=self.toggle_manual_curvature_entries,
-                                          state=tk.NORMAL if default_remove_curvature else tk.DISABLED)
-        self.manual_radio.pack(side=tk.LEFT, padx=(5,0))
+        radii_row = tk.Frame(curvature_frame)
+        radii_row.pack(anchor="w", padx=(20, 0))
+        tk.Label(radii_row, text="Rx (m)").pack(side=tk.LEFT)
+        self.rx_entry = tk.Entry(radii_row, width=10, state=tk.DISABLED)
+        self.rx_entry.pack(side=tk.LEFT, padx=(2, 8))
+        tk.Label(radii_row, text="Ry (m)").pack(side=tk.LEFT)
+        self.ry_entry = tk.Entry(radii_row, width=10, state=tk.DISABLED)
+        self.ry_entry.pack(side=tk.LEFT, padx=2)
 
-        # Add manual curvature parameters frame
-        self.manual_curvature_frame = tk.Frame(self.curvature_frame)
-        self.manual_curvature_frame.pack(anchor=tk.W, padx=(40, 0), fill=tk.X)  # Indent further
+        options_frame = tk.LabelFrame(self.left_frame, text="Options", padx=5, pady=5)
+        options_frame.pack(pady=3, fill="x")
+        self.timestamp_enabled = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            options_frame, text="Add time stamp", variable=self.timestamp_enabled
+        ).pack(anchor="w")
+        self.save_images = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            options_frame, text="Save extra images", variable=self.save_images
+        ).pack(anchor="w")
 
-        # Rx and Ry entry fields on the same row
-        rx_frame = tk.Frame(self.manual_curvature_frame)
-        rx_frame.pack(side=tk.LEFT, expand=True)
-        tk.Label(rx_frame, text="Rx (m)").pack(side=tk.LEFT, padx=(0,2))
-        self.rx_entry = tk.Entry(rx_frame, width=10, state=tk.DISABLED)
-        self.rx_entry.pack(side=tk.LEFT)
-
-        ry_frame = tk.Frame(self.manual_curvature_frame)
-        ry_frame.pack(side=tk.LEFT, expand=True, padx=(5, 0))
-        tk.Label(ry_frame, text="Ry (m)").pack(side=tk.LEFT, padx=(0,2))
-        self.ry_entry = tk.Entry(ry_frame, width=10, state=tk.DISABLED)
-        self.ry_entry.pack(side=tk.LEFT)
-
-        # Add a frame for Options
-        self.options_frame = tk.LabelFrame(self.left_frame, text="Options", padx=5, pady=5)
-        self.options_frame.pack(pady=3, fill="x")
-
-        # Add checkbox to add time stamp to the output file name
-        self.timestamp_enabled = tk.BooleanVar(value=default_timestamp)
-        self.timestamp_checkbox = tk.Checkbutton(self.options_frame, text="Add Time Stamp", variable=self.timestamp_enabled)
-        self.timestamp_checkbox.pack(anchor=tk.W)
-
-        # Add a checkbox for "Save images"
-        self.save_images = tk.BooleanVar(value=default_save_images)
-        self.save_images_checkbox = tk.Checkbutton(self.options_frame, text="Save extra images", variable=self.save_images)
-        self.save_images_checkbox.pack(anchor=tk.W)
-
-        # Create frames for each detector
-        detector_frame = tk.Frame(self.root, width=200)  # Set fixed width
-        detector_frame.grid(row=0, column=1, rowspan=5, padx=10, pady=3, sticky=tk.W+tk.E+tk.N+tk.S)    
-        detector_frame.grid_propagate(False)  # Prevent frame from resizing
-
-        # Configure column weights with absolute sizing
-        self.root.grid_columnconfigure(0, weight=0)  # First column (parameters) fixed width
-        self.root.grid_columnconfigure(1, weight=0, minsize=200)  # Detector column with minimum width
-        self.root.grid_columnconfigure(2, weight=1)  # Result column gets expanding space        
-
-        for i in range(5):
-            frame = tk.Frame(detector_frame, relief=tk.SOLID, borderwidth=2)
-            frame.pack(pady=5, fill=tk.X)
-
-            # Add header label
-            header = tk.Label(frame, text=f"Detector {i+1}", font="Helvetica 10 bold")
-            header.pack(pady=2)
-
-            # Create a canvas for the image and add to the frame
-            canvas = tk.Canvas(frame, width=150, height=100, relief=tk.SUNKEN, borderwidth=1)
-            canvas.pack(pady=2)
+    def _build_detector_panel(self) -> None:
+        detector_frame = tk.Frame(self.root, width=180)
+        detector_frame.grid(row=0, column=1, padx=5, pady=5, sticky="ns")
+        self.detector_canvases: list[tk.Canvas] = []
+        self.filename_labels: list[tk.Label] = []
+        for index in range(5):
+            frame = tk.LabelFrame(detector_frame, text=f"Detector {index + 1}")
+            frame.pack(pady=2, fill="x")
+            canvas = tk.Canvas(frame, width=145, height=82, relief=tk.SUNKEN, borderwidth=1)
+            canvas.pack(padx=4, pady=2)
+            label = tk.Label(frame, text="", wraplength=150)
+            label.pack(padx=2, pady=2)
             self.detector_canvases.append(canvas)
+            self.filename_labels.append(label)
 
-            filename_label = tk.Label(frame, text="", wraplength=150)
-            filename_label.pack(pady=5)
-            self.filename_labels.append(filename_label)
+    def _build_result_panel(self) -> None:
+        result_frame = tk.LabelFrame(self.root, text="Reconstruction")
+        result_frame.grid(row=0, column=2, padx=5, pady=5, sticky="nsew")
+        self.result_canvas = tk.Canvas(result_frame, width=500, height=500)
+        self.result_canvas.pack(expand=True, fill="both", padx=5, pady=5)
 
-            self.canvas = Canvas(root)
-            self.canvas.grid(row=0, column=2, rowspan=5, sticky=tk.W+tk.E+tk.N+tk.S, padx=10, pady=3)
-        # Create a frame for the result canvas with fixed 500px width
-        self.result_frame = tk.Frame(self.root, width=500, height=400, relief=tk.SOLID, borderwidth=2)
-        self.result_frame.grid(row=0, column=2, rowspan=5, sticky=tk.W+tk.E+tk.N+tk.S, padx=10, pady=3)
-        self.result_frame.grid_propagate(False)  # Prevent frame from resizing
-        self.result_frame.pack_propagate(False)  # Prevent frame from resizing
+    def _build_information_panel(self) -> None:
+        info_frame = tk.LabelFrame(self.root, text="Information")
+        info_frame.grid(row=1, column=0, columnspan=3, padx=10, pady=5, sticky="ew")
+        self.information = tk.Label(info_frame, text="Select three to five detector images.")
+        self.information.pack(padx=5, pady=5)
 
-        # Add header
-        header = tk.Label(self.result_frame, text="Reconstruction", font="Helvetica 12 bold")
-        header.pack(pady=5)
+    @staticmethod
+    def _short_path(path: Path) -> str:
+        text = str(path)
+        return text if len(text) <= 32 else "..." + text[-29:]
 
-        # Create the result canvas within the result frame
-        self.result_canvas = tk.Canvas(self.result_frame, width=500, height=350)
-        self.result_canvas.pack(expand=True, fill=tk.BOTH, padx=5, pady=5)
+    def choose_output_folder(self) -> None:
+        selected = filedialog.askdirectory(
+            title="Select output folder", initialdir=self.output_directory.get()
+        )
+        if selected:
+            self.output_directory.set(selected)
+            self.output_directory_label.config(text=self._short_path(Path(selected)))
 
-        # Create a frame for the log messages
-        self.log_frame = tk.Frame(self.root, relief=tk.SOLID, borderwidth=2)
-        self.log_frame.grid(row=6, column=0, columnspan=3, sticky=tk.W+tk.E+tk.N+tk.S, padx=10, pady=3)
-
-        # Add header
-        header = tk.Label(self.log_frame, text="Information", font="Helvetica 12 bold")
-        header.pack(pady=3)
-
-        # Add a message box for warnings
-        self.warning_box = tk.Label(self.log_frame, text="", width=150, justify=tk.LEFT)
-        self.warning_box.pack(pady=5)
-
-        self.root.bind('<Configure>', self.on_resize)
-        self.after_id = None
-
-        # Configure column weights
-        self.root.grid_columnconfigure(0, weight=1)  # Detector column
-        self.root.grid_columnconfigure(1, weight=2)  # Result column gets more space
-
-        # Configure row weights
-        for i in range(5):
-            self.root.grid_rowconfigure(i, weight=1)
-        self.root.grid_rowconfigure(5, weight=0)  # Result row
-
-
-    
-    
-    def exit_application(self):
+    def exit_application(self) -> None:
+        if self.worker is not None and self.worker.is_alive():
+            messagebox.showwarning(
+                "Reconstruction running", "Wait for the current reconstruction to finish."
+            )
+            return
         self.root.destroy()
-        self.root.after(10, self.root.quit)
-        
 
-    def on_resize(self, event=None):
-        # Cancel the previous scheduled call if it exists
-        if self.after_id:
+    def on_resize(self, _event: tk.Event | None = None) -> None:
+        if self.after_id is not None:
             self.root.after_cancel(self.after_id)
+        self.after_id = self.root.after(250, self.update_images)
 
-        # Schedule the update_images function to be called after a delay (e.g., 500 milliseconds)
-        self.after_id = self.root.after(500, self.update_images)
+    def _preview(self, path: Path, width: int, height: int) -> ImageTk.PhotoImage:
+        with Image.open(path) as source:
+            image = _prepare_preview_image(source)
+            image.thumbnail((max(width, 1), max(height, 1)), Image.Resampling.LANCZOS)
+        return ImageTk.PhotoImage(image)
 
-    def update_images(self, event=None):
-        self.root.update_idletasks()  # Update the window to get correct dimensions
-        for index, filepath in enumerate(self.filepaths):  # Assuming self.filepaths stores the paths of the uploaded files
-            # Get the frame's dimensions
-            canvas = self.detector_canvases[index]
-            frame_width = canvas.winfo_width() - 4  # Subtracting 2 times the margin (3px on each side)
-            frame_height = canvas.winfo_height() - 4
-
-            # Open the image
-            image = Image.open(Path(filepath))
-            
-            # Convert image to RGB mode if needed (important for PNG files)
-            if image.mode in ('RGBA', 'LA', 'P', 'I', 'F'):
-                image = image.convert('RGB')
-            elif image.mode != 'RGB':
-                image = image.convert('RGB')
-
-            # Calculate the aspect ratio
-            aspect_ratio = image.size[0] / image.size[1]
-
-            # Determine the target width and height based on the aspect ratio
-            if aspect_ratio > 1:
-                # Image is wider than tall
-                target_width = frame_width
-                target_height = int(frame_width / aspect_ratio)
-            else:
-                # Image is taller than wide or square
-                target_height = frame_height
-                target_width = int(frame_height * aspect_ratio)
-
-            # Resize the image
-            image = image.resize((target_width, target_height))
-            photo = ImageTk.PhotoImage(image)
-            
-            # Clear the canvas before creating new image
+    def update_images(self) -> None:
+        self.after_id = None
+        for index, canvas in enumerate(self.detector_canvases):
             canvas.delete("all")
-            
-            canvas.create_image(frame_width // 2, frame_height // 2, anchor=tk.CENTER, image=photo)
-            self.image_references.append(photo)
-
-        self.reshuffle_button.config(state=tk.NORMAL)
-        self.update_images()
-
-    def reshuffle_images(self):
-        if len(self.filepaths) == 3:
-            # Store original paths
-            temp = self.original_filepaths[2]
-            self.original_filepaths[2] = self.original_filepaths[1]
-            self.original_filepaths[1] = temp
-
-            # Also swap temporary filepaths
-            temp = self.filepaths[2]
-            self.filepaths[2] = self.filepaths[1]
-            self.filepaths[1] = temp
-
-        elif len(self.filepaths) == 4:
-            # Rotate images one position forward
-            temp_orig = self.original_filepaths[3]
-            temp = self.filepaths[3]
-            
-            for i in range(3, 0, -1):
-                self.original_filepaths[i] = self.original_filepaths[i-1]
-                self.filepaths[i] = self.filepaths[i-1]
-            
-            self.original_filepaths[0] = temp_orig
-            self.filepaths[0] = temp
-
-            # Swap the last two images
-            temp_orig = self.original_filepaths[3]
-            temp = self.filepaths[3]
-            self.original_filepaths[3] = self.original_filepaths[2]
-            self.filepaths[3] = self.filepaths[2]
-            self.original_filepaths[2] = temp_orig
-            self.filepaths[2] = temp
-
-        elif len(self.filepaths) == 5:
-            # Rotate images one position forward
-            temp_orig = self.original_filepaths[4]
-            temp = self.filepaths[4]
-            
-            for i in range(4, 0, -1):
-                self.original_filepaths[i] = self.original_filepaths[i-1]
-                self.filepaths[i] = self.filepaths[i-1]
-            
-            self.original_filepaths[0] = temp_orig
-            self.filepaths[0] = temp
-
-            # Swap the last two images
-            temp_orig = self.original_filepaths[4]
-            temp = self.filepaths[4]
-            self.original_filepaths[4] = self.original_filepaths[3]
-            self.filepaths[4] = self.filepaths[3]
-            self.original_filepaths[3] = temp_orig
-            self.filepaths[3] = temp
-
-        # Update the display
-        for index, filepath in enumerate(self.filepaths):
-            canvas = self.detector_canvases[index]
-            frame_width = canvas.winfo_width() - 6
-            frame_height = canvas.winfo_height() - 6
-
-            image = Image.open(Path(filepath))
-            aspect_ratio = image.size[0] / image.size[1]
-
-            if aspect_ratio > 1:
-                target_width = frame_width
-                target_height = int(frame_width / aspect_ratio)
-            else:
-                target_height = frame_height 
-                target_width = int(frame_height * aspect_ratio)
-
-            image = image.resize((target_width, target_height))
-            photo = ImageTk.PhotoImage(image)
-            
-            canvas.delete("all")
-            canvas.create_image(frame_width // 2, frame_height // 2, anchor=tk.CENTER, image=photo)
-            self.image_references.append(photo)
-
-        # Update the filename labels with original filenames
-        for index, filepath in enumerate(self.original_filepaths):
-            filename = os.path.basename(filepath)
-            self.filename_labels[index].config(text=filename)
-
-        self.update_images()
-
-    def upload_files(self):
-        self.filepaths = list(filedialog.askopenfilenames(title="Select up to 5 files", filetypes=[("Image Files", "*.png *.jpg *.jpeg *.gif *.tif")], multiple=True))
-        self.original_filepaths = self.filepaths
-        if self.filepaths != None:
-            self.run_button.config(state=tk.NORMAL)   
-        
-        # Limit to 5 files
-        self.filepaths = self.filepaths[:5]
-
-        # Clear the canvas
-        self.canvas.delete("all")
-
-        # Clear image references
-        self.image_references = []
-
-        # Display all images
-        for index, filepath in enumerate(self.filepaths):
-            if filepath.lower().endswith('.tif'):
-                tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
-                os.system(f"convert {filepath} -geometry 25% {tmp_file.name} > /dev/null 2>&1")
-                display_path = tmp_file.name
-                self.filepaths[index] = display_path 
-            elif filepath.lower().endswith('.png'):
-                # Handle PNG files the same way as TIFF for consistency
-                tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
-                os.system(f"convert {filepath} -geometry 25% {tmp_file.name} > /dev/null 2>&1")
-                display_path = tmp_file.name
-                self.filepaths[index] = display_path 
-            else:
-                display_path = filepath
-
+            if index >= len(self.filepaths):
+                self.image_references[index] = None
+                self.filename_labels[index].config(text="")
+                continue
+            width = max(canvas.winfo_width() - 6, 1)
+            height = max(canvas.winfo_height() - 6, 1)
             try:
-                # Use the appropriate canvas from the list
-                canvas = self.detector_canvases[index]
-                
-                # Force update to get correct dimensions
-                self.root.update_idletasks()
-                
-                # Get the frame's dimensions
-                frame_width = canvas.winfo_width() - 6  # Subtracting 2 times the margin (3px on each side)
-                frame_height = canvas.winfo_height() - 6
-                
-                # Safety check for canvas dimensions
-                if frame_width <= 0 or frame_height <= 0:
-                    frame_width = 150  # Default width
-                    frame_height = 100  # Default height
-
-                # Open the image
-                image = Image.open(display_path)
-                
-                # Convert image to RGB mode if needed (important for PNG files)
-                if image.mode in ('RGBA', 'LA', 'P', 'I', 'F'):
-                    image = image.convert('RGB')
-                elif image.mode != 'RGB':
-                    image = image.convert('RGB')
-
-                # Calculate the aspect ratio
-                aspect_ratio = image.size[0] / image.size[1]
-
-                # Determine the target width and height based on the aspect ratio
-                if aspect_ratio > 1:
-                    # Image is wider than tall
-                    target_width = frame_width
-                    target_height = int(frame_width / aspect_ratio)
-                else:
-                    # Image is taller than wide or square
-                    target_height = frame_height
-                    target_width = int(frame_height * aspect_ratio)
-
-                # Resize the image
-                image = image.resize((target_width, target_height))
-                photo = ImageTk.PhotoImage(image)
-                
-                # Clear the canvas before creating new image
-                canvas.delete("all")
-                
-                canvas.create_image(frame_width // 2, frame_height // 2, anchor=tk.CENTER, image=photo)
-                self.image_references.append(photo)
-
-            except Exception as e:
-                print(f"Error loading image {filepath}: {e}")
-                import traceback
-                traceback.print_exc()  # Print full error traceback
-
-            # Update the filename label
-            filename = os.path.basename(filepath)
-            self.filename_labels[index].config(text=filename)
-
-        self.reshuffle_button.config(state=tk.NORMAL)
-
-    def display_reconstruction(self, image_path):
-        # Load the image
-        image = Image.open(Path(image_path))
-
-        # Get the canvas dimensions
-        canvas_width = self.result_canvas.winfo_width()
-        canvas_height = self.result_canvas.winfo_height()
-
-        # Calculate the aspect ratio
-        aspect_ratio = image.size[0] / image.size[1]
-
-        # Compute scaling factors for width and height
-        width_scale = canvas_width / image.size[0]
-        height_scale = canvas_height / image.size[1]
-
-        # Use the smaller of the two scaling factors to ensure the image fits within the canvas
-        scale_factor = min(width_scale, height_scale)
-
-        # Determine the target width and height
-        target_width = int(image.size[0] * scale_factor)
-        target_height = int(image.size[1] * scale_factor)
-
-        # Resize the image
-        image = image.resize((target_width, target_height))
-        photo = ImageTk.PhotoImage(image)
-
-        # Display the image on the canvas
-        self.result_canvas.create_image((canvas_width - target_width) // 2, (canvas_height - target_height) // 2, anchor=tk.NW, image=photo)
-        self.result_canvas.image = photo  # Keep a reference to avoid garbage collection
-
-    def toggle_pixel_size_entry(self):
-        # Enable or disable the pixel size entry based on the checkbox
-        if self.use_tiff_pixel_size.get():
-            self.pixel_size_entry.config(state=tk.DISABLED)
-        else:
-            self.pixel_size_entry.config(state=tk.NORMAL)
-
-    def toggle_gauss_filter_entry(self):
-        # Enable or disable the Gauss filter entry based on the checkbox
-        if self.gauss_filter_enabled.get():
-            self.gauss_filter_entry.config(state=tk.NORMAL)
-        else:
-            self.gauss_filter_entry.config(state=tk.DISABLED)
-
-    def toggle_curvature_options(self):
-        """Enable or disable curvature mode options based on the main checkbox"""
-        if self.remove_curvature.get():
-            self.automatic_radio.config(state=tk.NORMAL)
-            self.manual_radio.config(state=tk.NORMAL)
-            
-            # Enable/disable manual parameters based on selected mode
-            if self.curvature_mode.get() == "manual":
-                self.rx_entry.config(state=tk.NORMAL)
-                self.ry_entry.config(state=tk.NORMAL)
+                photo = self._preview(self.filepaths[index], width, height)
+            except (OSError, ValueError) as exc:
+                self.image_references[index] = None
+                canvas.create_text(width // 2, height // 2, text="Preview unavailable")
+                self.information.config(text=f"Could not preview {self.filepaths[index].name}: {exc}")
             else:
-                self.rx_entry.config(state=tk.DISABLED)
-                self.ry_entry.config(state=tk.DISABLED)
+                self.image_references[index] = photo
+                canvas.create_image(width // 2, height // 2, anchor=tk.CENTER, image=photo)
+            self.filename_labels[index].config(text=self.filepaths[index].name)
+
+    def upload_files(self) -> None:
+        selected = filedialog.askopenfilenames(
+            title="Select three to five detector images",
+            filetypes=[
+                ("Image files", "*.png *.jpg *.jpeg *.tif *.tiff *.bmp"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not selected:
+            return
+        self.filepaths = [Path(path) for path in selected[:5]]
+        self.output_directory.set(str(self.filepaths[0].parent))
+        self.output_directory_label.config(
+            text=self._short_path(self.filepaths[0].parent)
+        )
+        count = len(self.filepaths)
+        valid = 3 <= count <= 5
+        self.run_button.config(state=tk.NORMAL if valid else tk.DISABLED)
+        self.reshuffle_button.config(state=tk.NORMAL if valid else tk.DISABLED)
+        self.information.config(
+            text=(
+                f"Loaded {count} detector images."
+                if valid
+                else "At least three detector images are required."
+            )
+        )
+        self.update_images()
+
+    def reshuffle_images(self) -> None:
+        count = len(self.filepaths)
+        if count == 3:
+            self.filepaths[1], self.filepaths[2] = self.filepaths[2], self.filepaths[1]
+        elif count in (4, 5):
+            self.filepaths = [self.filepaths[-1], *self.filepaths[:-1]]
+            self.filepaths[-2], self.filepaths[-1] = (
+                self.filepaths[-1],
+                self.filepaths[-2],
+            )
+        self.update_images()
+
+    def display_reconstruction(self, image_path: str | Path) -> None:
+        width = max(self.result_canvas.winfo_width() - 10, 1)
+        height = max(self.result_canvas.winfo_height() - 10, 1)
+        photo = self._preview(Path(image_path), width, height)
+        self.result_canvas.delete("all")
+        self.result_canvas.create_image(width // 2, height // 2, anchor=tk.CENTER, image=photo)
+        self.result_canvas.image = photo
+
+    def toggle_pixel_size_entry(self) -> None:
+        state = tk.DISABLED if self.use_tiff_pixel_size.get() else tk.NORMAL
+        self.pixel_size_entry.config(state=state)
+
+    def toggle_gaussian_entry(self) -> None:
+        state = tk.NORMAL if self.gaussian_enabled.get() else tk.DISABLED
+        self.gaussian_entry.config(state=state)
+
+    def toggle_curvature_options(self) -> None:
+        state = tk.NORMAL if self.remove_curvature.get() else tk.DISABLED
+        self.automatic_radio.config(state=state)
+        self.manual_radio.config(state=state)
+        self.toggle_manual_curvature_entries()
+
+    def toggle_manual_curvature_entries(self) -> None:
+        manual = self.remove_curvature.get() and self.curvature_mode.get() == "manual"
+        state = tk.NORMAL if manual else tk.DISABLED
+        self.rx_entry.config(state=state)
+        self.ry_entry.config(state=state)
+
+    def _read_parameters(self) -> dict[str, object]:
+        if len(self.filepaths) < 3:
+            raise ValueError("Select at least three detector images")
+        z_scale = float(self.z_scale_entry.get())
+        if self.use_tiff_pixel_size.get():
+            pixel_size = get_pixel_width(self.filepaths[0])
         else:
-            self.automatic_radio.config(state=tk.DISABLED)
-            self.manual_radio.config(state=tk.DISABLED)
-            self.rx_entry.config(state=tk.DISABLED)
-            self.ry_entry.config(state=tk.DISABLED)
+            manual = float(self.pixel_size_entry.get())
+            if manual <= 0:
+                raise ValueError("Manual pixel size must be positive")
+            pixel_size = manual * 1e-6  # GUI value is in micrometres.
 
-    def toggle_manual_curvature_entries(self):
-        """Enable or disable manual curvature entries based on mode selection"""
-        if self.remove_curvature.get() and self.curvature_mode.get() == "manual":
-            self.rx_entry.config(state=tk.NORMAL)
-            self.ry_entry.config(state=tk.NORMAL)
-        else:
-            self.rx_entry.config(state=tk.DISABLED)
-            self.ry_entry.config(state=tk.DISABLED)
-
-    def run(self):
-        imgNames = list(self.original_filepaths)
-        # Get the cutoff percentage from the slider
-        cutoff_percentage = self.cutoff_slider.get()
-
-        # Determine the value of Plot_images_decomposition based on the checkbox
-        Plot_images_decomposition = self.save_images.get()
-
-        # Get curvature removal parameters
         remove_curvature = self.remove_curvature.get()
-        curvature_mode = self.curvature_mode.get() if remove_curvature else "automatic"
-        manual_rx = float(self.rx_entry.get()) if remove_curvature and curvature_mode == "manual" and self.rx_entry.get() else None
-        manual_ry = float(self.ry_entry.get()) if remove_curvature and curvature_mode == "manual" and self.ry_entry.get() else None
+        curvature_mode = self.curvature_mode.get()
+        manual_rx = manual_ry = None
+        if remove_curvature and curvature_mode == "manual":
+            manual_rx = float(self.rx_entry.get())
+            manual_ry = float(self.ry_entry.get())
+            if manual_rx == 0 or manual_ry == 0:
+                raise ValueError("Manual curvature radii must be nonzero")
 
-        # If time stamp is enabled, create a log file
-        if self.timestamp_enabled.get():
-            timeStamp = "_"+datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        return {
+            "plot_images_decomposition": self.save_images.get(),
+            "gaussian_filter_enabled": self.gaussian_enabled.get(),
+            "sigma": self.gaussian_sigma.get() if self.gaussian_enabled.get() else 0.0,
+            "remove_curvature": remove_curvature,
+            "curvature_mode": curvature_mode,
+            "manual_rx": manual_rx,
+            "manual_ry": manual_ry,
+            "cutoff_frequency": self.cutoff_slider.get() / 100.0,
+            "save_file_type": self.output_format.get(),
+            "time_stamp": self.timestamp_enabled.get(),
+            "pixelsize": pixel_size,
+            "z_scaling_factor_per_pixel": z_scale,
+            "output_dir": Path(self.output_directory.get()),
+        }
+
+    def _set_running(self, running: bool) -> None:
+        state = tk.DISABLED if running else tk.NORMAL
+        self.upload_button.config(state=state)
+        self.reshuffle_button.config(state=state)
+        self.run_button.config(state=state)
+        self.exit_button.config(state=state)
+
+    def run(self) -> None:
+        try:
+            parameters = self._read_parameters()
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Invalid parameters", str(exc))
+            return
+        self._set_running(True)
+        self.information.config(text="Reconstruction is running...")
+        self.worker = threading.Thread(
+            target=self._run_worker, args=(list(self.filepaths), parameters), daemon=True
+        )
+        self.worker.start()
+        self.root.after(100, self._poll_worker)
+
+    def _run_worker(self, paths: list[Path], parameters: dict[str, object]) -> None:
+        try:
+            result = construct_surface(paths, **parameters)
+        except Exception as exc:  # transferred to the UI thread
+            self.worker_results.put(("error", exc))
         else:
-            timeStamp = ""
-        logFileName = "log" + timeStamp + ".log"
-        logFile = open(logFileName, "a")
-        
-        log(logFile,"\n" + "="*50)
-        log(logFile,"Reconstruction started at: " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        log(logFile,"="*50)
+            self.worker_results.put(("success", result))
 
-        if self.use_tiff_pixel_size.get():
-            try:
-                pixelsize = get_pixel_width(imgNames[0])
-                log(logFile,"Read from TIF file, pixel size = " + str(pixelsize)+ " (m)")
-            except ValueError as e:
-                self.warning_box.config(text="", fg="red")  # Reset and set color to red
-                self.warning_box.config(text="Error: Pixel size could not be found in image files, please introduce it manually. The reconstruction stopped.")
-                logFile.close()
-                return
-        else:
-            pixelsize = float(self.pixel_size_entry.get()) 
-            log(logFile,"Manually introduced, pixel size = " + str(pixelsize)+ " (m)")
+    def _poll_worker(self) -> None:
+        try:
+            status, payload = self.worker_results.get_nowait()
+        except queue.Empty:
+            if self.worker is not None and self.worker.is_alive():
+                self.root.after(100, self._poll_worker)
+            return
 
-        # Get the Gauss filter settings
-        gauss_filter = self.gauss_filter_enabled.get()
-        gauss_sigma = self.gauss_filter_value.get() if gauss_filter else 0
+        self._set_running(False)
+        if status == "error":
+            self.information.config(text="Reconstruction failed.")
+            messagebox.showerror("Reconstruction failed", str(payload))
+            return
 
-        imgName, _, _ ,_, return_message = constructSurface(imgNames, 
-                                   Plot_images_decomposition, 
-                                   gauss_filter,  # Use the Gauss filter setting
-                                   gauss_sigma,   # Use the Gauss filter value
-                                   self.reconstruction_mode.get(),  # Use the selected reconstruction mode
-                                   RemoveCurvature=remove_curvature,  # Use the Remove Curvature setting
-                                   curvature_mode=curvature_mode,  # Add curvature mode
-                                   manual_rx=manual_rx,  # Add manual Rx
-                                   manual_ry=manual_ry,  # Add manual Ry
-                                   cutoff_frequency=0.01*cutoff_percentage,
-                                   save_file_type=self.output_format.get(),
-                                   time_stamp=self.timestamp_enabled.get(),
-                                   pixelsize=pixelsize, # put pixelsize in meters
-                                   ZscalingFactorPerPixel=float(self.z_scale_entry.get()),
-                                   Z_ref=float(self.Z_ref_entry.get()),
-                                   Z_current=float(self.Z_current_entry.get()),
-                                   logFile=logFile)
-        self.display_reconstruction(imgName)
-        if return_message != "":
-            warning_window = tk.Toplevel(self.root)
-            warning_window.title("Warning")
-            warning_window.geometry("400x100")
-            warning_window.transient(self.root)  # Make window modal
-            warning_window.grab_set()  # Make window modal
-            
-            # Center the window
-            warning_window.geometry("+%d+%d" % (self.root.winfo_rootx() + 50,
-                                              self.root.winfo_rooty() + 50))
-            
-            # Add warning message
-            message = tk.Label(warning_window, text=return_message, wraplength=350, pady=10)
-            message.pack()
-            
-            # Add OK button
-            ok_button = tk.Button(warning_window, text="Ok", command=warning_window.destroy)
-            ok_button.pack(pady=10)
-        else:
-            self.warning_box.config(text=f"3D surface successfully reconstructed. All information is saved in the log file {logFileName}")
+        image_name, _, _, _, warning = payload
+        self.display_reconstruction(image_name)
+        output = Path(image_name).parent
+        self.information.config(text=f"Reconstruction finished. Output: {output}")
+        if warning:
+            messagebox.showwarning("Reconstruction warning", warning)
 
-if __name__ == "__main__":
+
+def main() -> None:
+    """Launch the desktop application."""
     header()
     root = tk.Tk()
-    uploader = SEMto3Dinterface(root)
+    SEMto3Dinterface(root)
     root.mainloop()
 
+
+if __name__ == "__main__":
+    main()

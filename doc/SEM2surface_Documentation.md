@@ -1,6 +1,6 @@
 ---
 title: 3D Surface Reconstruction from SEM/BSE multi-detector images
-date: August 2023 - Dec 2024
+date: August 2023 - September 2026
 header-includes: |
   \usepackage{authblk}
   \author{Vladislav A. Yastrebov}
@@ -11,7 +11,7 @@ header-includes: |
 
 ## 1. Overview
 
-This script reconstructs 3D surfaces from SEM images obtained from at least 3 BSE detectors without prior knowledge of their orientation. The reconstruction is based on SVD decomposition, x and y gradient components are obtained using Radon transform, the full surface is reconstructed either by direct gradient integration or, preferably, by an FFT-based method by [@frankot]. The whole strategy is based on the method described in [@neggers]. 
+This software reconstructs 3D surfaces from SEM images obtained from at least 3 BSE detectors without prior knowledge of their orientation. The reconstruction is based on SVD decomposition, x and y gradient components are obtained using a Radon transform, and the full surface is reconstructed by the FFT-based method of [@frankot]. The whole strategy is based on the method described in [@neggers].
 
 ## 2. Method
 
@@ -72,20 +72,9 @@ If one wants to reconstruct only main features of the roughness and ignore or sm
 
 ![FFT reconstruction of the surface $z(x,y)$](fft_reconstruction.png){#fig:surface_fft}
 
-7.b. An alternative method is a direct integration along $x$ and $y$ direction followed by minimizing distance between adjacent profiles and averaging between profiles integrated along $x$ and $y$. In general, this method provides results of much lower quality, and is based on the following relations:
-    + Assume that the first profile along $y$ is zero $z^{1,j}_x = 0$ for $j\in[1,N_y]$.
-    + Integrate the first profile along $x$ direction $z^{i+1,1}_x = z^{i,1}_x + G_x^{i,1} \Delta x$ for $i\in[1,N_x-1]$, where $\Delta x$ is the pixel size.
-    + Integrate next profile along $x$ direction $\tilde z^{i+1,j}_x = z^{i,j}_x + G_x^{i,j} \Delta x$ for $i\in[1,N_x-1]$ and $j\in[2,N_y]$ and remove the average difference with respect to the previous provile $z^{i+1,j}_x = \tilde z^{i+1,j}_x - \langle \tilde z^{i+1,j}_x - z^{i+1,j-1}_x \rangle$.
-    + Repeat the previous step for all profiles along $y$ direction using $G_y$ to get $z^{i,j}_y$.
-    + Remove the average value of $z^{i,j}_x$ and $z^{i,j}_y$, i.e. $z^{i,j}_x = z^{i,j}_x - \langle z^{i,j}_x \rangle$ and $z^{i,j}_y = z^{i,j}_y - \langle z^{i,j}_y \rangle$.
-    + Construct the final surface as $z(x,y) = \frac{1}{2} \left( z^{i,j}_x + z^{i,j}_y \right)$.
-
-![Reconstructed surface $z(x,y)$ using direct integration](0Surface_DirectIntegration_0.png){#fig:surface}
-
 8. The final step is the removal of the curvature of the surface which apparently comes from the deformation of the field of view especially for high zooms. This is done by fitting a parabolic surface in principal axes 
-$$z(x,y) = \frac{x^2}{R_x^2} + \frac{y^2}{R_y^2} + z_0$$ 
+$$z(x,y) = \frac{x^2}{2R_x} + \frac{y^2}{2R_y} + z_0$$
 and substracting it from the surface. The curvatures $R_x,R_y$  and the off-set $z_0$ are obtained by the least square fitting procedure.
 This is the key step in the reconstruction procedure which allows us to flip the surface on the correct side (thanks to this curvature) and also to determine whether the order of images provided to the steps 2,3,4 are well ordered. If the resulting curvatures have different signs, the image is still reconstructed but it must be meaningless. A Warning is issued to let the user reorder the images to get a proper reconstruction. For example, if the initial order was $\{A,B,C\}$ it can be reordered as $\{A,C,B\}$.
 
 ## References
-

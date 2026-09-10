@@ -1,120 +1,267 @@
-# `sem2surface` a Tool for 3D Surface Reconstruction from Multi-Detector SEM/BSE Images 
+# sem2surface
 
-**`sem2surface`** &nbsp; ![logo](src/logo.png)
+`sem2surface` reconstructs a three-dimensional surface from three to five
+multi-detector SEM/BSE images. It extracts two normalized principal images,
+identifies their orientation with a Radon transform, and integrates the resulting
+gradients using the Frankot-Chellappa FFT method.
 
-## Overview
+<!-- PyPI cannot resolve repository-relative images. Keep this absolute URL. -->
+![3D surface reconstruction from multi-detector SEM images](https://raw.githubusercontent.com/vyastreb/sem2surface/master/img/explication.jpg)
 
-This repository contains a Python-based solution for 3D surface reconstruction from SEM/BSE images captured using a minimum of three detectors. The methodology leverages the Principal Component Analysis (PCA) of the captured images to discern the principal component images [1]. To reorient gradient images along $x$ and $y$ axes, the Radon transform is used. The final 3D surface, represented as \(z(x,y)\), is derived from its gradients either through the Frankot and Chellappa method [2] (this is the reference method providing the best results) or via direct integration paired with a minimization process between adjacent profiles. 
+The reconstruction can be used qualitatively with an arbitrary vertical scale.
+Quantitative measurements require a calibrated Z scaling factor for the imaging
+configuration. The included Vickers-indentation example demonstrates that
+calibration procedure.
 
-![3D Surface Reconstruction from milti-detector SEM](img/explication.jpg)
+## Installation
 
-For qualitative results, any scaling factor for the vertical axis can be applied to the final surface. However, to get the quantitative results, the scaling factor has to be provided.
-The simplest way to find the scaling factor is to use the Vickers hardness test's imprint as a reference surface for the given SEM and given material. The `fit_Vickers_indenter.py` module enables to find the scaling factor from the Vickers hardness test's imprint.
+Python 3.10 or newer is required. An isolated virtual environment is strongly
+recommended so the application does not conflict with system Python packages.
 
-![Reconstruction of the indented surface](img/indent_superposition.jpg)
+### Linux and macOS
 
-## Features
+Create an environment and install a released version:
 
-- **Intuitive GUI**: A user-friendly simplistic interface built with Python's Tkinter allows for easy image uploads and 3D surface construction.
-- **Comprehensive Outputs**: Each execution yields:
-  - 3 original images and their PCA decomposition (PNG format).
-  - Radon transform RMS change wrt the rotation angle (PDF format).
-  - Gradients visualisation along $x$ and $y$ (PNG format).
-  - 3D map of the reconstructed surface (2 PNG files).
-  - ASCII representation of the reconstructed surface with \(x,y,z\) columns.
-  - Surface roughness data (CVS,VTK or NPZ format).
-  - Detailed log file capturing all operations (TXT format).
-
-## Getting Started
-
-Check that all required packages are installed:
 ```bash
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install sem2surface
+sem2surface-gui
 ```
-To launch the interface, execute the following command:
+
+Until a release is uploaded to PyPI, run the final installation command from
+this source checkout instead:
+
 ```bash
-python sem2surface_gui.py
+python -m pip install .
 ```
-To run without GUI, use the following command (do not forget to provide your own images directly in the script):
+
+On Linux, Tkinter may be packaged separately. For example, Ubuntu and Debian
+users can install it with their system package manager as `python3-tk` before
+creating the environment.
+
+### Windows
+
+Install Python 3.10 or newer from
+[python.org](https://www.python.org/downloads/windows/). Keep the standard
+`pip`, Tcl/Tk, and Python Launcher components enabled. Then open PowerShell in
+the folder where you want the environment and run:
+
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install sem2surface
+sem2surface-gui
+```
+
+If PowerShell blocks the activation script, allow it only for the current
+PowerShell process and retry activation:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+```
+
+In Command Prompt, activate the same environment with:
+
+```bat
+.venv\Scripts\activate.bat
+```
+
+Activation is optional. The GUI can always be launched directly:
+
+```powershell
+.\.venv\Scripts\sem2surface-gui.exe
+```
+
+Before the PyPI release, install either from a source checkout with
+`python -m pip install .` or from the provided wheel:
+
+```powershell
+python -m pip install "C:\path\to\sem2surface-0.2.0-py3-none-any.whl"
+```
+
+Use `deactivate` to leave the environment on any platform. Do not copy a
+virtual environment between computers or move it after creation; create a new
+one and reinstall the package instead.
+
+VTK export is optional because VTK is a large dependency:
+
 ```bash
-python test_without_gui.py
+python -m pip install "sem2surface[vtk]"
+# From this source checkout instead: python -m pip install ".[vtk]"
 ```
-A user has to upload at least three SEM images (supported formats: JPG, PNG, TIFF, BMP) and initiate the reconstruction process by clicking the "3D Reconstruct" button.
 
-## Graphical User Interface
+The application does not require ImageMagick or a LaTeX installation. Tkinter is
+included with the standard Python installers on Windows and macOS.
 
-![Graphical User Interface](doc/sem2surface_gui.png)
+## Desktop application
 
-The interface is built with Python's Tkinter. The following functions/options are available:
+After installation, launch the graphical interface from a terminal:
 
-**Functions:**
-+ **Upload Images** - upload at least three SEM images (supported formats: JPG, PNG, TIFF, BMP).
-+ **Reshuffle Images** - reshuffle the uploaded images.
-+ **Run 3D constr.** - initiate the reconstruction process.
-+ **Exit** - close the interface.
+```bash
+sem2surface-gui
+```
 
-**Options:**
-- **Z Scaling Factor**: The scaling factor for the vertical axis (to be defined, e.g. through the Vickers hardness test's imprint)
-- **Atomic numbers**: The atomic numbers of the reference material (on which the scaling factor is defined) and the current material (on which the current measurement is carried out, use composite atomic numbers for complex materials weighted by mass percentage)
-- **Output Format**: The format of the output file (CSV, VTK, NPZ) or "do not save"
-- **FFT Cutoff**: The cutoff frequency for the FFT reconstruction in percentage of the Nyquist frequency
-- **Pixel Size**: If the pixel size if provided in SEM-generated TIFF files, check the checkbox "From TIFF", otherwise provide the pixel size in m/pixel.
-- **Reconstruction Mode**: FFT (preferable) or direct integration
-- **Gauss Filter**: If True, a Gaussian filter is applied to the original images, `sigma` - the standard deviation of the Gaussian filter
-- **Add time stamp**: If checked, the time stamp is added to the output file name
-- **Remove Curvature**: If checked, the curvature is removed from the final surface, this is an important step for both qualitative and quantitative analysis.
-- **Save extra images**: If checked, several intermediate images are saved (PCA decomposition, Radon transform RMS change wrt the rotation angle, gradients visualisation along $x$ and $y$).
+Select three to five detector images, confirm the pixel size and scaling factor,
+choose an output directory, and start the reconstruction. TIFF, PNG, JPEG, and
+BMP images are supported. The work runs in the background so the window remains
+responsive.
 
-## Repository Structure
+The GUI intentionally provides only the FFT reconstruction. Atomic-number
+correction and direct profile integration have been removed.
 
-- `src/`
-  - `sem2surface.py`: Core module for 3D surface reconstruction from SEM/BSE images.
-  - `sem2surface_gui.py`: GUI module.
-  - `fit_Vickers_indenter.py`: Module to find scaling factor from Vickers hardness test's imprint.
-  - `test_without_gui.py`: Example of the script without GUI.
-  - `logo.png`, `logo.svg`: Application logo.
-- `doc/`
-  - `sem2surface.pdf`: Concise documentation.
-  - other source files for the documentation.
-- `examples/`
-  - `Surface_1/`: Example of the script without GUI.
-  - `Surface_2/`: Example of the script without GUI.
-  - `Vickers_imprint/`: Example of the script without GUI.
-  - `Vickers_imprint_scaling/`: Example of the procedure to be used to identify scaling based on Vickers' imprint.
-- `requirements.txt`: List of required packages.
-- `README.md`: This file.
+## Command line
 
-## References
+Installation also provides a `sem2surface` executable:
 
-+ [1] Neggers, J., Héripré, E., Bonnet, M., Boivin, D., Tanguy, A., Hallais, S., Gaslain, F., Rouesne, E. and Roux, S. (2021). Principal image decomposition for multi-detector backscatter electron topography reconstruction. *Ultramicroscopy*, 227:113200. [DOI](https://doi.org/10.1016/j.ultramic.2020.113200)
-+ [2] Frankot, R. T., & Chellappa, R. (1988). A method for enforcing integrability in shape from shading algorithms. *IEEE Transactions on Pattern Analysis and Machine Intelligence*, 10(4):439-451. [DOI](https://doi.org/10.1109/34.3909)
+```bash
+sem2surface detector_A.tif detector_B.tif detector_C.tif \
+  --z-scale 217.27243 \
+  --save npz \
+  --output-dir results
+```
 
-## Additional Information
+Pixel size is read from the first TIFF by default. For images without compatible
+SEM metadata, provide it in micrometres:
 
-- **Developer**: Vladislav A. Yastrebov
-  - Affiliation: CNRS, Mines Paris - PSL, Centre des matériaux, Evry/Paris, France
-  - Date: Aug 2023 - Dec 2024
-  - [yastrebov.fr](https://yastrebov.fr)
-- **Licence**: BSD 3-Clause License.
+```bash
+sem2surface detector_A.png detector_B.png detector_C.png \
+  --pixel-size-um 0.325521 \
+  --curvature none
+```
 
-## Examples
+Run `sem2surface --help` for the complete list of options. VTK output requires
+the optional `vtk` installation described above.
 
-![3D Surface Reconstruction from milti-detector SEM](img/big_surface.jpg)
-![3D Surface Reconstruction from milti-detector SEM](examples/Surface_1/VTK_view_x10.png)
-![3D Surface Reconstruction from milti-detector SEM](examples/Surface_2/VTK_view.png)
-![3D Surface Reconstruction from Vickers hardness test](examples/Vickers_imprint/VTK_view.png)
+## Python API
 
-## Releases
+```python
+from pathlib import Path
 
-+ [v0.1.0](https://github.com/vyastreb/sem2surface/releases/tag/v0.1.0) - Initial release (Dec 12, 2024)
+from sem2surface import construct_surface
 
-## Analogues software
+images = [Path("detector_A.tif"), Path("detector_B.tif"), Path("detector_C.tif")]
+preview, X, Y, Z, warning = construct_surface(
+    images,
+    z_scaling_factor_per_pixel=217.27243,
+    remove_curvature=True,
+    save_file_type="NPZ",
+    output_dir="results",
+)
+```
 
-A similar technique is available in [Mountains® software by DigitalSurf](https://www.digitalsurf.com/software-solutions/scanning-electron-microscopy), but, of course, it is not free and not open.
+Pixel size and manual curvature radii use metres in the Python API. Returned
+coordinate and height arrays use micrometres. The old `constructSurface`
+function remains as a compatibility wrapper for version 0.1 scripts, but only
+FFT reconstruction is accepted and the old atomic-number arguments are ignored.
 
-## Acknowledgements
+## Outputs
 
-All SEM measurements were obtained by Fabrice Gaslain [(ORCID)](https://orcid.org/0000-0001-5187-1613), CNRS, Mines Paris -PSL, Centre des matériaux, Evry/Paris, France.
+Every reconstruction creates:
 
-The code was developed with the assistance of GPT-4, CoderPad plugin, Copilot in VSCode and Claude 3.5 Sonnet in Cursor.
+- a colour PNG of the reconstructed surface;
+- a grayscale PNG suitable for further image analysis;
+- a UTF-8 log containing parameters, input names, angles, and surface RMS.
 
+Surface arrays can additionally be saved as CSV, compressed NumPy NPZ, or VTK
+structured-grid data. Optional diagnostic output includes the detector/PCA
+decomposition, Radon search, and oriented gradients.
+
+When timestamps are disabled, an existing output with the same name is replaced.
+Choose a dedicated output folder or enable timestamps when results must be kept.
+
+## Reference examples and scaling
+
+The [examples directory](https://github.com/vyastreb/sem2surface/tree/master/examples)
+contains the reference analyses:
+
+- `Surface_1` and `Surface_2`: representative reconstructed surfaces;
+- `Vickers_imprint`: reconstruction of a Vickers indentation;
+- `Vickers_imprint_scaling`: identification of the Z scaling factor from the
+  known Vickers geometry.
+
+After installing the package with the VTK extra, an example can be run from any
+working directory:
+
+```bash
+python examples/Surface_1/test_without_gui.py
+```
+
+<!-- PyPI cannot resolve repository-relative images. Keep this absolute URL. -->
+![Reconstruction of the indented surface](https://raw.githubusercontent.com/vyastreb/sem2surface/master/img/indent_superposition.jpg)
+
+## Development
+
+Create an isolated environment and install the editable project with its test
+tools:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[test]"
+python -m pytest
+python -m build
+python -m twine check dist/*
+```
+
+Continuous integration tests Python 3.10 and 3.13 on Linux, Windows, and macOS,
+and verifies both the source distribution and universal wheel.
+
+### Maintainer release checklist
+
+Use a clean virtual environment and update the version in both
+`pyproject.toml` and `src/sem2surface.py`. PyPI does not allow an uploaded file
+or release version to be replaced.
+
+```bash
+python -m pytest -q
+python -m build
+python -m twine check dist/*
+```
+
+For a first trial, create a separate account and API token on
+[TestPyPI](https://test.pypi.org/), then upload only the files for the new
+version:
+
+```bash
+python -m twine upload --repository testpypi dist/sem2surface-0.2.0*
+```
+
+When prompted, use `__token__` as the username and the complete TestPyPI token,
+including its `pypi-` prefix, as the password. Test the uploaded wheel in a new
+environment without resolving dependencies from TestPyPI:
+
+```bash
+python -m pip install --index-url https://test.pypi.org/simple/ --no-deps sem2surface==0.2.0
+sem2surface --version
+```
+
+For the real release, create a PyPI account and API token at
+[pypi.org](https://pypi.org/), then run:
+
+```bash
+python -m twine upload dist/sem2surface-0.2.0*
+```
+
+PyPI and TestPyPI use separate accounts and tokens. Never commit a token or put
+one directly in a command. For later automated releases, prefer
+[PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/).
+
+## Method references
+
+1. Neggers, J. et al. (2021). Principal image decomposition for multi-detector
+   backscatter electron topography reconstruction. *Ultramicroscopy*, 227,
+   113200. [DOI](https://doi.org/10.1016/j.ultramic.2020.113200)
+2. Frankot, R. T. and Chellappa, R. (1988). A method for enforcing integrability
+   in shape from shading algorithms. *IEEE Transactions on Pattern Analysis and
+   Machine Intelligence*, 10(4), 439-451.
+   [DOI](https://doi.org/10.1109/34.3909)
+
+## Author and license
+
+Developed by Vladislav A. Yastrebov, CNRS, Mines Paris – PSL, Centre des
+matériaux. Distributed under the
+[BSD 3-Clause License](https://github.com/vyastreb/sem2surface/blob/master/LICENSE).

@@ -1,797 +1,724 @@
-#---------------------------------------------------------------------------#
-#                                                                           #
-# SEM/BSE 3D surface reconstruction: 2. Backend part                        #
-#                                                                           #
-# Reconstructor for 3D surface from SEM images from                         #
-# at least 3 BSE detectors without knowledge of their orientation           #
-#                                                                           #
-# The reconstruction relies on SVD-PCA extraction, Radon transform          #
-# and Frankot-Chellappa FFT-based reconstruction technique or               #
-# direct integration from dz/dx and dz/dy gradients                         #
-#                                                                           #
-# V.A. Yastrebov, CNRS, MINES Paris, Aug 2023-Dec 2024                      #
-# Licence: BSD 3-Clause                                                     #
-#                                                                           #
-# Aided by :                                                                #
-#  - GPT4 with CoderPad plugin                                              #
-#  - Copilot in VSCode                                                      #
-#  - Claude 3.5 Sonnet in cursor.                                           #
-#                                                                           #
-#---------------------------------------------------------------------------# 
+"""Core routines for reconstructing surfaces from multi-detector SEM images."""
 
-import numpy as np
+from __future__ import annotations
+
+import datetime as _datetime
+import re
+import warnings
+from pathlib import Path
+from typing import IO, Sequence
+
+import matplotlib
+
+# The core only writes figures. A non-interactive backend also makes the module
+# safe to call from the GUI worker thread and on headless machines.
+matplotlib.use("Agg")
+
+import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
+import numpy as np
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+from PIL import Image
 from scipy.ndimage import gaussian_filter
 from skimage.transform import radon
-import matplotlib.gridspec as gridspec
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-from scipy.optimize import minimize
-import vtk
-import datetime
-from scipy.optimize import curve_fit
-from pathlib import Path
 
 
-pixelsize0 = 1e-6 # default value in meter, if the user asks to search in the TIF file, but there is no PixelWidth in the TIF file
+__version__ = "0.2.0"
+DEFAULT_PIXEL_SIZE = 1e-6
+_PIXEL_WIDTH_TAGS = ("PixelWidth=", "Image Pixel Size =")
+
+plt.rcParams["font.family"] = "serif"
 
 
-# Configure Matplotlib to use LaTeX for text rendering
-plt.rcParams['font.family'] = 'serif'
-plt.rcParams['font.serif'] = ['Palatino'] 
-plt.rcParams['text.usetex'] = True
-plt.rcParams['text.latex.preamble'] = r'\usepackage{pxfonts}'
+def write_vtk(filename: str | Path, X: np.ndarray, Y: np.ndarray, z: np.ndarray) -> None:
+    """Write a surface as a VTK XML structured grid."""
+    try:
+        import vtk
+    except ImportError as exc:  # pragma: no cover - optional package
+        raise RuntimeError(
+            "VTK export requires: pip install 'sem2surface[vtk]'"
+        ) from exc
 
-# # Backscattering coefficient models from [1] Böngeler, R., Golla, U., Kässens, M., Reimer, L., Schindler, B., Senkel, R. and Spranck, M., 1993. Electron‐specimen interactions in low‐voltage scanning electron microscopy. Scanning, 15(1), pp.1-18. DOI: https://doi.org/10.1002/sca.4950150102
-def backscattering_coefficient(phi, Z):
-    return (1+np.cos(phi*np.pi/180))**(-9/np.sqrt(Z))
-
-def backscattering_coefficient_2(phi, Z):
-    return 0.89*(backscattering_coefficient(0, Z)/0.89)**np.cos(phi*np.pi/180)
-
-def write_vtk(filename, X, Y, z):
-    """
-    Save {x, y, z} data as a VTK structured grid and color it by the z-values.
-
-    Args:
-        filename (str): Output file name.
-        X (numpy.ndarray): 2D array of x-coordinates.
-        Y (numpy.ndarray): 2D array of y-coordinates.
-        Z (numpy.ndarray): 2D array of z-coordinates.
-    """
-    # Ensure input arrays are numpy arrays
     X, Y, Z = np.asarray(X), np.asarray(Y), np.asarray(z)
-
-    # Check consistency of dimensions
     if not (X.shape == Y.shape == Z.shape):
         raise ValueError("X, Y, and Z must have the same dimensions")
+    if X.ndim != 2:
+        raise ValueError("X, Y, and Z must be two-dimensional")
 
-    # Get dimensions
-    ny, nx = X.shape  # Note: VTK uses (nx, ny, nz) ordering
-
-    # Create points for the grid
+    ny, nx = X.shape
     points = vtk.vtkPoints()
     for j in range(ny):
         for i in range(nx):
-            points.InsertNextPoint(X[j, i], Y[j, i], Z[j, i])
+            points.InsertNextPoint(float(X[j, i]), float(Y[j, i]), float(Z[j, i]))
 
-    # Create structured grid
     grid = vtk.vtkStructuredGrid()
-    grid.SetDimensions(nx, ny, 1)  # Grid dimensions (nx, ny, nz)
+    grid.SetDimensions(nx, ny, 1)
     grid.SetPoints(points)
 
-    # Add z-value as a scalar attribute for coloring
     z_values = vtk.vtkDoubleArray()
     z_values.SetName("Z-Value")
     z_values.SetNumberOfComponents(1)
     z_values.SetNumberOfTuples(nx * ny)
-
     for j in range(ny):
         for i in range(nx):
-            idx = j * nx + i
-            z_values.SetValue(idx, Z[j, i])
-
+            z_values.SetValue(j * nx + i, float(Z[j, i]))
     grid.GetPointData().SetScalars(z_values)
 
-    # Write to VTK file
     writer = vtk.vtkXMLStructuredGridWriter()
-    writer.SetFileName(filename)
+    writer.SetFileName(str(filename))
     writer.SetInputData(grid)
-    writer.Write()
+    if writer.Write() != 1:
+        raise OSError(f"VTK failed to write {filename}")
 
-# Function that outputs log information both in terminal and log file
-def log(logFile, text):
-    print("*     "+text)
-    logFile.write(text + "\n")
 
-def parabolic_surface(params, X, Y):
+def log(log_file: IO[str], text: str) -> None:
+    """Write a message to both stdout and the reconstruction log."""
+    print("*     " + text)
+    log_file.write(text + "\n")
+    log_file.flush()
+
+
+def parabolic_surface(params: Sequence[float], X: np.ndarray, Y: np.ndarray) -> np.ndarray:
+    """Return a centred separable paraboloid with radii ``a`` and ``b``."""
     a, b, c = params
-    x0 = (np.max(X[0,:]) - np.min(X[0,:]))/2.
-    y0 = (np.max(Y[:,0]) - np.min(Y[:,0]))/2.
-    return (X-x0)**2/(2*a) + (Y-y0)**2/(2*b) + c
-def objective_function(params, X, Y, Z):
-    return np.sum((Z - parabolic_surface(params, X, Y))**2)
+    x0 = 0.5 * (np.max(X) + np.min(X))
+    y0 = 0.5 * (np.max(Y) + np.min(Y))
+    return (X - x0) ** 2 / (2 * a) + (Y - y0) ** 2 / (2 * b) + c
 
-def remove_outside_central_circle(img):
-    # When done in this manner, radon sometimes issues a warning that the image should be zero outside the circle, but it anyway works correctly        
-    # Create a coordinate grid
-    modified_img = img.copy()
-    x, y = np.ogrid[:img.shape[0], :img.shape[1]]
-    radius = min(img.shape[0], img.shape[1]) // 2
-    center_x = img.shape[0] // 2
-    center_y = img.shape[1] // 2
-    # Create a mask for values outside the circle
-    mask = (x - center_x)**2 + (y - center_y)**2 > radius**2
-    # Zero out values outside the circle
-    modified_img[mask] = 0
-    # Crop the image to the central circle
-    img = img[center_x-radius:center_x+radius, center_y-radius:center_y+radius]
-    return modified_img
 
-# Extract pixel size from the tif image file (if it is there)
-def get_pixel_width(filename):
-    with open(Path(filename), 'rb') as file:
-        # Go to the end of the file FIXME: removed this line because some SEMs write metadata in the beginning of the file
-        # file.seek(-3000, 2)  # Go 3000 characters before the end, adjust if needed
-        # Read the last part of the file
-        content = file.read().decode('ISO-8859-1')
-        TAG_PIXEL_WIDTH = ["PixelWidth=", "XResolution=", "ResolutionX=", "Image Pixel Size = "]
+def objective_function(
+    params: Sequence[float], X: np.ndarray, Y: np.ndarray, Z: np.ndarray
+) -> float:
+    return float(np.sum((Z - parabolic_surface(params, X, Y)) ** 2))
 
-        import re
-        for tag in TAG_PIXEL_WIDTH:
-            start_index = content.find(tag)
-            if start_index != -1:
-                start_index += len(tag)
-                end_index = content.find('\n', start_index)
-                pixel_width_value = content[start_index:end_index].strip()
-                print("Tag = " + tag + " Pixel width value = " + pixel_width_value)
-                
-                # First try to parse as a complete scientific notation number
-                # This handles cases like "1.10243e-006" (which is 1.10243 × 10⁻⁶)
-                scientific_match = re.search(r'(\d+\.?\d*e[+-]?\d+)', pixel_width_value, re.IGNORECASE)
-                if scientific_match:
-                    try:
-                        value = float(scientific_match.group(1))
-                        print(f"Parsed scientific notation: {value} m")
-                        return value
-                    except ValueError:
-                        pass
-                
-                # Try to extract value and units if present (for cases with explicit units)
-                match = re.search(r'(\d+\.?\d*)\s*([a-zA-Zµ]*)?', pixel_width_value)
-                if match:
-                    value = float(match.group(1))
-                    units = match.group(2).lower() if match.group(2) else "m"  # Default to meters if no unit
-                    # Convert to meters based on units
-                    if units in ["nm", "nanometer", "nanometers"]:
-                        return value * 1e-9
-                    elif units in ["um", "µm", "micron", "microns", "micrometer", "micrometers"]:
-                        return value * 1e-6
-                    elif units in ["mm", "millimeter", "millimeters"]:
-                        return value * 1e-3
-                    elif units in ["cm", "centimeter", "centimeters"]:
-                        return value * 1e-2
-                    elif units in ["m", "meter", "meters", ""]:
-                        return value
-                    else:
-                        # If units not recognized, assume meters
-                        return value
-                else:
-                    # If no units found, try to convert the raw value
-                    try:
-                        return float(pixel_width_value)
-                    except ValueError:
-                        continue  # Try next tag
 
-        # If none of the tags matched or value could not be parsed
-        raise ValueError("No pixel width found in image files, introduce it manually in the interface.")
+def remove_outside_central_circle(img: np.ndarray) -> np.ndarray:
+    """Return a copy with pixels outside the largest central circle set to zero."""
+    modified = np.asarray(img).copy()
+    rows, columns = np.ogrid[: modified.shape[0], : modified.shape[1]]
+    radius = min(modified.shape) // 2
+    center_row = modified.shape[0] // 2
+    center_column = modified.shape[1] // 2
+    outside = (rows - center_row) ** 2 + (columns - center_column) ** 2 > radius**2
+    modified[outside] = 0
+    return modified
 
-# #######################################################################################
-# Use Frankot and Chellappa method to integrate surface from two gradients
-# See: R.T. Frankot, R. Chellappa (1988). Method for enforcing integrability in 
-# shape from shading algorithms, IEEE Trans. Pattern Anal. Mach. Intell. 10(4):439-451.
-# #######################################################################################
-def reconstruct_surface_FFT(Gx, Gy, cutoff = 0):
-    # Fourier transform of the gradients
-    Cx = np.fft.fft2(Gx) 
-    Cy = np.fft.fft2(Gy) 
-    n, m = Gx.shape
 
-    # Wave numbers
-    kx = np.fft.fftshift(np.arange(0, m) - m / 2) 
-    ky = np.fft.fftshift(np.arange(0, n) - n / 2)  
-    Kx, Ky = np.meshgrid(kx, ky)
+def _parse_length(value: str) -> float | None:
+    match = re.search(
+        r"([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)\s*([a-zA-Zµμ]*)",
+        value,
+    )
+    if not match:
+        return None
+    magnitude = float(match.group(1))
+    unit = match.group(2).lower().replace("μ", "µ")
+    factors = {
+        "": 1.0,
+        "m": 1.0,
+        "meter": 1.0,
+        "meters": 1.0,
+        "nm": 1e-9,
+        "nanometer": 1e-9,
+        "nanometers": 1e-9,
+        "um": 1e-6,
+        "µm": 1e-6,
+        "micron": 1e-6,
+        "microns": 1e-6,
+        "micrometer": 1e-6,
+        "micrometers": 1e-6,
+        "mm": 1e-3,
+        "cm": 1e-2,
+    }
+    factor = factors.get(unit)
+    if factor is None:
+        return None
+    result = magnitude * factor
+    return result if np.isfinite(result) and result > 0 else None
 
-    # Cutoff high-frequency (to remove noise) components if needed
+
+def get_pixel_width(filename: str | Path) -> float:
+    """Read the physical pixel width, in metres, from SEM TIFF metadata."""
+    path = Path(filename)
+    content = path.read_bytes().decode("ISO-8859-1")
+    for tag in _PIXEL_WIDTH_TAGS:
+        start = content.find(tag)
+        if start < 0:
+            continue
+        start += len(tag)
+        ends = [
+            position
+            for position in (content.find("\n", start), content.find("\x00", start))
+            if position >= 0
+        ]
+        raw_value = content[start : min(ends, default=len(content))].strip()
+        value = _parse_length(raw_value)
+        if value is not None:
+            return value
+    raise ValueError(
+        f"No physical pixel width was found in {path.name}; enter it manually."
+    )
+
+
+def reconstruct_surface_fft(
+    gradient_rows: np.ndarray, gradient_columns: np.ndarray, cutoff: float = 0.0
+) -> np.ndarray:
+    """Integrate two gradients using the Frankot-Chellappa FFT method.
+
+    ``cutoff`` is a fraction of the Nyquist frequency and must be in [0, 1].
+    Historical frequency normalization is retained so existing calibration
+    factors remain valid, while ``fftfreq`` fixes odd-sized images.
+    """
+    gx = np.asarray(gradient_rows, dtype=np.float64)
+    gy = np.asarray(gradient_columns, dtype=np.float64)
+    if gx.shape != gy.shape or gx.ndim != 2:
+        raise ValueError("Both gradients must be two-dimensional and have the same shape")
+    if not 0 <= cutoff <= 1:
+        raise ValueError("FFT cutoff must be between 0 and 1")
+
+    rows, columns = gx.shape
+    row_frequencies = np.fft.fftfreq(rows) * rows
+    column_frequencies = np.fft.fftfreq(columns) * columns
+    k_columns, k_rows = np.meshgrid(column_frequencies, row_frequencies)
+
+    transformed_x = np.fft.fft2(gx)
+    transformed_y = np.fft.fft2(gy)
     if cutoff > 0:
-        cutoff_sq = (min(m,n)*cutoff/2)**2
-        # Create a mask for high frequencies using vectorized operations
-        freq_mask = ((Kx**2 + Ky**2) > cutoff_sq) & ((Kx**2 + (Ky-n)**2) > cutoff_sq) & \
-                    ((Kx-m)**2 + (Ky-n)**2) > cutoff_sq & ((Kx-m)**2 + Ky**2) > cutoff_sq
-        # Apply mask to both Fourier transforms
-        Cx[freq_mask] = 0
-        Cy[freq_mask] = 0
+        cutoff_squared = (min(rows, columns) * cutoff / 2) ** 2
+        high_frequency = k_rows**2 + k_columns**2 > cutoff_squared
+        transformed_x[high_frequency] = 0
+        transformed_y[high_frequency] = 0
+
+    denominator = k_rows**2 + k_columns**2
+    transformed_surface = np.zeros_like(transformed_x, dtype=np.complex128)
+    nonzero = denominator > 0
+    transformed_surface[nonzero] = (
+        -1j
+        * (
+            k_rows[nonzero] * transformed_x[nonzero]
+            + k_columns[nonzero] * transformed_y[nonzero]
+        )
+        / denominator[nonzero]
+    )
+    surface = np.fft.ifft2(transformed_surface).real
+    return surface - np.mean(surface)
 
 
-    # The minimizer is given by the inverse Fourier transform of the solution
-    denom = Kx**2 + Ky**2
-    C = np.where(denom != 0, -1j * ( Ky * Cx + Kx * Cy) / denom, 0)
+# Backwards-compatible spelling used by v0.1 scripts.
+reconstruct_surface_FFT = reconstruct_surface_fft
 
-    #CAUTION: Do not try to remove curvature in Fourier space, it can produce a lot of artefacts!
 
-    # Return to real space
-    Cinv = np.fft.ifft2(C)
-    z = np.real(Cinv)
-
-    # Set the mean value to zero
-    z = z - np.mean(z)
-
-    return z
-
-# #######################################################################################
-# Use direct integration of the surface from two gradients line by line and ensure
-# the minimal distance between adjacent lines, in the end average the two surfaces
-# #######################################################################################
-def reconstruct_surface_direct_integration(Gx, Gy, pixelsize): 
-    Gx -= np.mean(Gx)
-    Gy -= np.mean(Gy)           
-    Gx = Gx * pixelsize
-    Gy = Gy * pixelsize
-    # Integrate along x-direction
-    int_x = np.cumsum(Gx, axis=0)
-    int_x_aligned = np.zeros(int_x.shape)
-    int_x_aligned[0,:] = 0 #int_x[0,:]
-    for j in range(1, int_x.shape[1]):
-        int_x_aligned[:,j] = int_x[:,j] + np.mean(int_x_aligned[:,j-1] - int_x[:,j])
-    
-    # Integrate along y-direction
-    int_y = np.cumsum(Gy, axis=1)
-    int_y_aligned = np.zeros(int_y.shape)
-    int_y_aligned[:,0] = int_x_aligned[:,0]
-    for i in range(1, int_y.shape[0]):
-        int_y_aligned[i,:] = int_y[i,:] + np.mean(int_y_aligned[i-1,:] - int_y[i,:])
-    
-    int_x_aligned -= np.mean(int_x_aligned)
-    int_y_aligned -= np.mean(int_y_aligned)
-
-    # Assemble the surface by averaging
-    # z = 0.5 * (int_x_aligned + int_y_aligned)
-    z = int_y_aligned
-    
-    # Adjust the mean value to zero
-    z = z - np.mean(z)
-    
-    return z
-
-def plot_image_decomposition(imgs, img1, G1, G2, timeStamp, logFile):
-    """
-    Plot the images: top row is original images, bottom row is polar decomposition
-    """
-    # Plot the images: top row is original images, bottom row is polar decomposition
-    fig,ax = plt.subplots(2,3,figsize=(12,8))
-    # remove all ticks and labels
-    for axi in ax.flat:
-        axi.xaxis.set_visible(False)
-        axi.yaxis.set_visible(False)
-    # Decrease spacing between subplots
-    plt.subplots_adjust(wspace=0., hspace=0.)
-    # Decrease margins
-    plt.subplots_adjust(left=0.05, right=0.95, top=0.9, bottom=0.1)
-
-    plt.subplot(2,3,1)
-    plt.imshow(imgs[0])
-    plt.title("Image 1, $I_1$")
-
-    plt.subplot(2,3,2)
-    plt.imshow(imgs[1])
-    plt.title("Image 2, $I_2$")
-
-    plt.subplot(2,3,3)
-    plt.imshow(imgs[2])
-    plt.title("Image 3, $I_3$")
-
-    plt.subplot(2,3,4)
-    plt.imshow(img1)
-    plt.title("Principal Image, $A$")
-
-    plt.subplot(2,3,5)
-    plt.imshow(G1)
-    plt.title("Normalized principal Image 2, $G_1$")
-
-    plt.subplot(2,3,6)
-    plt.imshow(G2)
-    plt.title("Normalized principal Image 3, $G_2$")
-
-    plt.tight_layout()
-    # Save with a unique identifier with a time tag and save in info in log file
-    filename = "Images_decomposition" + timeStamp + ".png"
-    fig.savefig(filename, dpi=300)
-    log(logFile,"Images decomposition saved to " + filename)
-
-def plot_radon_rms(total_angles, total_rms, theta1, theta2, filename=None):
-    plt.figure(figsize=(6, 4))
-    
-    # Find and highlight the minimum RMS angle
-    min_angle = theta1
-    min_angle2 = theta2
-    max_rms = np.max(total_rms)
-    total_rms = total_rms/max_rms
-
-    plt.plot(total_angles, total_rms, 'k-', label='Radon RMS')
-    plt.scatter(total_angles, total_rms, c='green', marker='o', s=20, zorder=10)
-    plt.ylim(None,1.0)
-    
-    plt.axvline(x=min_angle, color="k", linestyle="--")
-    plt.text(min_angle*1.05, 0.5, "$\\theta_1$ = {0:.2f}".format(min_angle), color="k")
-    plt.axvline(x=min_angle2, color="k", linestyle="--")
-    plt.text(min_angle2*1.05, 0.1, "$\\theta_2$ = {0:.2f}".format(min_angle2), color="k")
-    plt.xlim(0,180)
-    plt.xlabel('Angle (degrees)')
-    plt.ylabel('Normalized Radon RMS Value')
-    plt.title('Radon Transform RMS vs Angle')
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.legend()
-    plt.tight_layout()
-    if filename is not None:
-        plt.savefig(filename)
-
-def compute_image_gradients(imgs):
-    """
-    Compute robust gradients using PCA-like approach with proper correlation matrix
-    
-    Parameters:
-    -----------
-    imgs : list of numpy.ndarray
-        List of input images (same shape)
-    
-    Returns:
-    --------
-    tuple: (img1,G1, G2)
-        Gradient images computed from PCA decomposition
-    """
-    # Ensure all images have the same shape
-    if len(set(img.shape for img in imgs)) > 1:
+def compute_image_gradients(
+    imgs: Sequence[np.ndarray],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Compute the intensity image and two normalized principal images."""
+    if len(imgs) < 3:
+        raise ValueError("At least three detector images are required")
+    shapes = {np.asarray(img).shape for img in imgs}
+    if len(shapes) != 1:
         raise ValueError("All input images must have the same shape")
-    
-    # Reshape images into 2D matrix (each row is a flattened image)
-    img_matrix = np.array([img.flatten() for img in imgs])
-    
-    nb_images = img_matrix.shape[0]
-    
-    # Compute correlation matrix
-    CorrMatrix = np.zeros((nb_images,nb_images))
-    for i in range(nb_images):
-        for j in range(nb_images):
-            CorrMatrix[i,j] = np.dot(img_matrix[i], img_matrix[j]) #/ np.sqrt(np.dot(img_matrix[i], img_matrix[i]) * np.dot(img_matrix[j], img_matrix[j]))
-    
-    # Perform SVD on the correlation matrix
-    U, S, V = np.linalg.svd(CorrMatrix)
-        
-    # Reconstruct images using the first two principal components
-    img_shape = imgs[0].shape
-    img1 = np.zeros(img_shape)
-    img2 = np.zeros(img_shape)
-    img3 = np.zeros(img_shape)
-    
-    for i in range(nb_images):
-        img1 += U[i, 0] * imgs[i]
-        img2 += U[i, 1] * imgs[i]
-        img3 += U[i, 2] * imgs[i]
-    # Avoid division by zero
-    meanImg1 = np.mean(img1)
-    img1 = np.where(img1 == 0, meanImg1, img1)
-    
-    # Compute gradients
-    # Normalize by the first principal component image
-    G1 = img2 / (img1)
-    G2 = img3 / (img1)    
-        
-    return img1, G1, G2
+    if len(next(iter(shapes))) != 2:
+        raise ValueError("Detector images must be two-dimensional")
 
-def convert_to_grayscale(img):
+    image_stack = np.asarray(imgs, dtype=np.float64)
+    image_matrix = image_stack.reshape(image_stack.shape[0], -1)
+    correlation = image_matrix @ image_matrix.T
+    eigenvectors, _, _ = np.linalg.svd(correlation, full_matrices=False)
+
+    # Eigenvector signs are arbitrary. Fix each one by its largest loading so
+    # different BLAS implementations produce consistent output.
+    for component in range(3):
+        pivot = int(np.argmax(np.abs(eigenvectors[:, component])))
+        if eigenvectors[pivot, component] < 0:
+            eigenvectors[:, component] *= -1
+
+    principal = np.tensordot(eigenvectors[:, :3].T, image_stack, axes=(1, 0))
+    intensity, component_1, component_2 = principal
+    if np.mean(intensity) < 0:
+        intensity *= -1
+        component_1 *= -1
+        component_2 *= -1
+
+    threshold = max(float(np.max(np.abs(intensity))) * 1e-12, np.finfo(float).tiny)
+    signs = np.where(intensity < 0, -1.0, 1.0)
+    safe_intensity = np.where(np.abs(intensity) > threshold, intensity, signs * threshold)
+    return intensity, component_1 / safe_intensity, component_2 / safe_intensity
+
+
+def convert_to_grayscale(img: np.ndarray) -> np.ndarray:
+    """Convert an RGB/RGBA array to floating-point grayscale."""
+    array = np.asarray(img)
+    if array.ndim == 2:
+        return array
+    if array.ndim != 3 or array.shape[2] < 3:
+        raise ValueError(f"Unsupported image shape: {array.shape}")
+    return np.dot(array[..., :3], [0.299, 0.587, 0.114])
+
+
+def _read_image(path: Path) -> np.ndarray:
+    with Image.open(path) as image:
+        array = np.asarray(image)
+    return np.asarray(convert_to_grayscale(array), dtype=np.float64)
+
+
+def _plot_image_decomposition(
+    imgs: np.ndarray,
+    intensity: np.ndarray,
+    gradient_1: np.ndarray,
+    gradient_2: np.ndarray,
+    filename: Path,
+) -> None:
+    columns = max(len(imgs), 3)
+    fig, axes = plt.subplots(2, columns, figsize=(4 * columns, 8), squeeze=False)
+    for axis in axes.flat:
+        axis.set_axis_off()
+    for index, image in enumerate(imgs):
+        axes[0, index].imshow(image, cmap="gray")
+        axes[0, index].set_title(f"Detector image {index + 1}")
+    components = (
+        (intensity, "Principal intensity image"),
+        (gradient_1, "Normalized principal image 2"),
+        (gradient_2, "Normalized principal image 3"),
+    )
+    for index, (image, title) in enumerate(components):
+        axes[1, index].imshow(image)
+        axes[1, index].set_title(title)
+    fig.tight_layout()
+    fig.savefig(filename, dpi=300)
+    plt.close(fig)
+
+
+def _plot_radon_rms(
+    angles: np.ndarray,
+    rms: np.ndarray,
+    theta_1: float,
+    theta_2: float,
+    filename: Path,
+) -> None:
+    fig, axis = plt.subplots(figsize=(6, 4))
+    maximum = float(np.max(rms))
+    normalized = rms / maximum if maximum > 0 else np.zeros_like(rms)
+    axis.plot(angles, normalized, "k-", label="Radon RMS")
+    axis.scatter(angles, normalized, c="green", marker="o", s=20, zorder=10)
+    axis.set_ylim(None, 1.0)
+    for angle, height, label in ((theta_1, 0.5, "1"), (theta_2, 0.1, "2")):
+        axis.axvline(x=angle, color="k", linestyle="--")
+        axis.text(angle + 2, height, f"theta_{label} = {angle:.2f} deg", color="k")
+    axis.set_xlim(0, 180)
+    axis.set_xlabel("Angle (degrees)")
+    axis.set_ylabel("Normalized Radon RMS value")
+    axis.set_title("Radon transform RMS vs angle")
+    axis.grid(True, linestyle="--", alpha=0.7)
+    axis.legend()
+    fig.tight_layout()
+    fig.savefig(filename)
+    plt.close(fig)
+
+
+def _find_principal_angle(
+    gradient: np.ndarray, log_file: IO[str]
+) -> tuple[float, np.ndarray, np.ndarray]:
+    dissection = 10
+    angle_start = 0.0
+    angle_end = 180.0
+    all_angles: list[float] = []
+    all_rms: list[float] = []
+    circular_gradient = remove_outside_central_circle(gradient)
+
+    for iteration in range(5):
+        log(
+            log_file,
+            f"   / Radon search: iteration {iteration} "
+            f"angle_start = {angle_start} angle_end = {angle_end}",
+        )
+        theta = np.linspace(angle_start, angle_end, dissection, endpoint=False)
+        transformed = radon(circular_gradient, theta=theta, circle=True)
+        rms = np.sum((transformed - np.mean(transformed, axis=0)) ** 2, axis=0)
+        all_angles.extend(theta.tolist())
+        all_rms.extend(rms.tolist())
+        theta_1 = float(theta[np.argmin(rms)])
+        # Preserve the v0.1 refinement trajectory: the published calibration
+        # examples and their scaling factors were obtained with this narrowing
+        # rule. Changing it would silently require recalibration.
+        previous_end = angle_end
+        angle_start = theta_1 - 2 * (previous_end - angle_start) / dissection
+        angle_end = theta_1 + 2 * (previous_end - angle_start) / dissection
+
+    theta_1 %= 180.0
+    angles = np.mod(np.asarray(all_angles), 180.0)
+    values = np.asarray(all_rms)
+    order = np.argsort(angles)
+    return theta_1, angles[order], values[order]
+
+
+def _remove_curvature(
+    z: np.ndarray,
+    X: np.ndarray,
+    Y: np.ndarray,
+    mode: str,
+    manual_rx: float | None,
+    manual_ry: float | None,
+    log_file: IO[str],
+) -> tuple[np.ndarray, str]:
+    if mode == "manual":
+        if manual_rx is None or manual_ry is None or manual_rx == 0 or manual_ry == 0:
+            raise ValueError("Manual curvature correction requires nonzero Rx and Ry")
+        rx_um = manual_rx * 1e6
+        ry_um = manual_ry * 1e6
+        base = parabolic_surface((rx_um, ry_um, 0.0), X, Y)
+        shift = float(np.mean(z - base))
+        result = z - parabolic_surface((rx_um, ry_um, shift), X, Y)
+        log(
+            log_file,
+            f"Curvature manually removed: Rx = {manual_rx:.2e} m, "
+            f"Ry = {manual_ry:.2e} m, optimal dz = {shift:.2f} um",
+        )
+        return result, ""
+    if mode != "automatic":
+        raise ValueError("Curvature mode must be 'automatic' or 'manual'")
+
+    try:
+        center_x = 0.5 * (np.max(X) + np.min(X))
+        center_y = 0.5 * (np.max(Y) + np.min(Y))
+        scale_x = max(0.5 * (np.max(X) - np.min(X)), 1.0)
+        scale_y = max(0.5 * (np.max(Y) - np.min(Y)), 1.0)
+        x_squared = ((X - center_x) / scale_x) ** 2
+        y_squared = ((Y - center_y) / scale_y) ** 2
+        design = np.column_stack(
+            (x_squared.ravel(), y_squared.ravel(), np.ones(z.size))
+        )
+        coefficients, _, rank, _ = np.linalg.lstsq(design, z.ravel(), rcond=None)
+        if rank < 3 or not np.all(np.isfinite(coefficients)):
+            raise RuntimeError("the paraboloid fit is rank-deficient")
+        coefficient_x = coefficients[0] / scale_x**2
+        coefficient_y = coefficients[1] / scale_y**2
+        if coefficient_x == 0 or coefficient_y == 0:
+            raise RuntimeError("the fitted curvature is zero")
+        rx_fit = 1.0 / (2.0 * coefficient_x)
+        ry_fit = 1.0 / (2.0 * coefficient_y)
+        dz_fit = float(coefficients[2])
+        fitted_surface = (
+            coefficients[0] * x_squared
+            + coefficients[1] * y_squared
+            + coefficients[2]
+        )
+        result = z - fitted_surface
+        if rx_fit * ry_fit < 0:
+            message = (
+                "Warning: Wrong order of images. The result is not reliable. "
+                "Reshuffle images and run again."
+            )
+            log(log_file, f"WARNING: {message} Rx = {rx_fit:.2f} um, Ry = {ry_fit:.2f} um")
+        else:
+            message = ""
+            log(
+                log_file,
+                f"Curvature removed: Rx = {rx_fit:.2f} um, Ry = {ry_fit:.2f} um, "
+                f"dz = {dz_fit:.2f} um",
+            )
+            if rx_fit > 0 and ry_fit > 0:
+                result *= -1
+                log(log_file, "The reconstructed surface was flipped.")
+        return result, message
+    except (RuntimeError, ValueError, FloatingPointError) as exc:
+        log(log_file, f"Curvature removal skipped because fitting failed: {exc}")
+        return z, f"Warning: curvature removal failed: {exc}"
+
+
+def construct_surface(
+    img_names: Sequence[str | Path],
+    *,
+    plot_images_decomposition: bool = False,
+    gaussian_filter_enabled: bool = False,
+    sigma: float = 1.0,
+    remove_curvature: bool = False,
+    curvature_mode: str = "automatic",
+    manual_rx: float | None = None,
+    manual_ry: float | None = None,
+    cutoff_frequency: float = 0.0,
+    save_file_type: str = "",
+    time_stamp: bool = False,
+    pixelsize: float | None = None,
+    z_scaling_factor_per_pixel: float = 1.0,
+    output_dir: str | Path = ".",
+    log_file: IO[str] | None = None,
+) -> tuple[str, np.ndarray, np.ndarray, np.ndarray, str]:
+    """Reconstruct a surface from three or more detector images.
+
+    Pixel size and curvature radii are expressed in metres. Returned X, Y and Z
+    arrays are expressed in micrometres.
     """
-    Convert multi-channel image to grayscale if needed.
-    
-    Parameters:
-    -----------
-    img : numpy.ndarray
-        Input image array
-        
-    Returns:
-    --------
-    numpy.ndarray
-        Grayscale image array
-    """
-    if len(img.shape) > 2:
-        # Convert to grayscale using luminance formula
-        if img.shape[2] == 4:  # RGBA
-            # Remove alpha channel first
-            img = img[:, :, :3]
-        # Convert to grayscale using luminance formula
-        return np.dot(img[..., :3], [0.299, 0.587, 0.114])
-    return img
+    paths = [Path(name).expanduser() for name in img_names]
+    if len(paths) < 3:
+        raise ValueError("At least three detector images are required")
+    missing = [str(path) for path in paths if not path.is_file()]
+    if missing:
+        raise FileNotFoundError("Input image(s) not found: " + ", ".join(missing))
+    if sigma < 0:
+        raise ValueError("Gaussian sigma cannot be negative")
+    if not 0 <= cutoff_frequency <= 1:
+        raise ValueError("FFT cutoff must be between 0 and 1")
+    if pixelsize is None:
+        pixelsize = get_pixel_width(paths[0])
+    if not np.isfinite(pixelsize) or pixelsize <= 0:
+        raise ValueError("Pixel size must be a positive number in metres")
+    if not np.isfinite(z_scaling_factor_per_pixel):
+        raise ValueError("Z scaling factor must be finite")
 
-def constructSurface(imgNames, 
-                     Plot_images_decomposition, 
-                     GaussFilter, 
-                     sigma, 
-                     ReconstructionMode,
-                     RemoveCurvature=False, 
-                     curvature_mode="automatic",
-                     manual_rx=None,
-                     manual_ry=None,
-                     cutoff_frequency=0, 
-                     save_file_type="", 
-                     time_stamp=False, 
-                     pixelsize=None, 
-                     ZscalingFactorPerPixel=1.0, 
-                     Z_ref=None,
-                     Z_current=None,
-                     logFile=None):
-        """
-        Construct the surface from the images
-        """
-        return_message = ""
-        # Create a log file with time stamp        
-        now = datetime.datetime.now()
-        if time_stamp:
-            timeStamp = "_"+now.strftime("%Y-%m-%d_%H-%M-%S")
-        else:
-            timeStamp = ""
-        if logFile is None:
-            logFileName = "log" + timeStamp + ".log"
-            logFile = open(Path(logFileName), "a")        
-        log(logFile,"All information is saved to " + logFile.name)
-        log(logFile,"Parameters:")
-        log(logFile,"   / Plot intermediate images = " + str(Plot_images_decomposition))
-        log(logFile,"   / Gauss filter = " + str(GaussFilter))
-        log(logFile,"   / STD Gauss filter  = " + str(sigma))
-        log(logFile,"   / Remove curvature = " + str(RemoveCurvature))
-        if RemoveCurvature:
-            log(logFile,"   / Curvature mode = " + str(curvature_mode))
-            if curvature_mode == "manual":
-                log(logFile,"   / Manual Rx = " + str(manual_rx) + " (m)")
-                log(logFile,"   / Manual Ry = " + str(manual_ry) + " (m)")
-        log(logFile,"   / Reconstruction Mode = " + str(ReconstructionMode))
-        log(logFile,"   / FFT cutoff frequency = " + str(cutoff_frequency))
-        log(logFile,"   / Output file type = " + str(save_file_type))
-        if time_stamp:
-            log(logFile,"   / Time stamp = " + str(time_stamp)[1:])
-        else:
-            log(logFile,"   / Time stamp = No")
-        log(logFile,"   / Pixel size = " + str(pixelsize) +" (m)")
-        log(logFile,"   / Z scaling factor per pixel = " + str(ZscalingFactorPerPixel) + " (1/m)")
-        ZscalingFactor = ZscalingFactorPerPixel * pixelsize
-        log(logFile,"   / Z scaling factor = " + str(ZscalingFactor) + " (-)")
-        tilt_sensitivity_factor = 1.0
-        if Z_ref is not None and Z_current is not None:
-            # # Approximate difference in tilt sensitivity between reference material and current material in the interval 0-20 degrees
-            angles = np.linspace(0,20,100)
-            tilt_sensitivity_factor = np.mean(backscattering_coefficient_2(angles, Z_ref) / backscattering_coefficient_2(angles, Z_current))
-            log(logFile,"   / Z_ref = " + str(Z_ref))
-            log(logFile,"   / Z_current = " + str(Z_current))
-            log(logFile,"   / Tilt sensitivity factor = " + str(tilt_sensitivity_factor))
-        else:
-            log(logFile,"   / Z_ref = None")
-            log(logFile,"   / Z_current = None")
-            log(logFile,"   / Tilt sensitivity factor = " + str(tilt_sensitivity_factor))
-
-        # Save the names of the images to the log file
-        log(logFile,"Images folder:" + "/".join(imgNames[0].split("/")[:-1]))
-        log(logFile,"Images names:")
-        for imgName in imgNames:
-            log(logFile,"    / " + imgName.split("/")[-1])
-        
-# ======================================================================== #
-#   1. Read the images, remove the white line at the bottom of the image   #
-#   1.2 If required, filter the images with a Gaussian filter              #
-# ======================================================================== #
-        tmp = plt.imread(Path(imgNames[0]))
-        # Convert to grayscale if needed
-        if len(tmp.shape) > 2:
-            log(logFile, "Warning: Multi-channel image detected. Converting to grayscale.")
-            tmp = convert_to_grayscale(tmp)
-        # Detect first white line in the image
-        cutY = tmp.shape[0]
-        for i in range(1,tmp.shape[0]):
-            if abs(np.mean(tmp[i,:]) - 1437.) < 2:
-                cutY = i-1
-                break
-        # Save the cutY value to the log file
-        log(logFile,"SEM data starts at " + str(cutY))
-        imgs = np.zeros((3,cutY, tmp.shape[1]))
-        for i in range(3):
-            img = plt.imread(Path(imgNames[i]))
-            # Convert to grayscale if needed
-            if len(img.shape) > 2:
-                img = convert_to_grayscale(img)
-            imgs[i] = img[:cutY,:] # removes 
-
-        # Replace nan values with interpolated values
-        imgs[0] = np.nan_to_num(imgs[0])
-        imgs[1] = np.nan_to_num(imgs[1])
-        imgs[2] = np.nan_to_num(imgs[2])
-
-        if GaussFilter:
-            # Gauss filter all gradient images
-            for i in range(imgs.shape[0]):
-                imgs[i] = gaussian_filter(imgs[i], sigma=sigma)
-            log(logFile,"Gauss filter with sigma = " + str(sigma) + " is applied to all images.")
-
-# ======================================================================== #
-#   2. Construct correlation matrix and compute image gradients            #
-#   3. SVD to find the principal components and compute image gradients    #
-#   4. Compute image gradients from the principal components               #
-# ======================================================================== #
-        img1, G1, G2 = compute_image_gradients(imgs)
-
-        if Plot_images_decomposition:
-            plot_image_decomposition(imgs, img1, G1, G2, timeStamp, logFile)
+    output_directory = Path(output_dir).expanduser()
+    output_directory.mkdir(parents=True, exist_ok=True)
+    timestamp = (
+        "_" + _datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        if time_stamp
+        else ""
+    )
+    owns_log = log_file is None
+    if log_file is None:
+        log_file = (output_directory / f"log{timestamp}.log").open("a", encoding="utf-8")
+    try:
+        return _construct_surface(
+            paths,
+            plot_images_decomposition=plot_images_decomposition,
+            gaussian_filter_enabled=gaussian_filter_enabled,
+            sigma=sigma,
+            remove_curvature=remove_curvature,
+            curvature_mode=curvature_mode,
+            manual_rx=manual_rx,
+            manual_ry=manual_ry,
+            cutoff_frequency=cutoff_frequency,
+            save_file_type=save_file_type,
+            time_stamp=timestamp,
+            pixelsize=float(pixelsize),
+            z_scaling_factor_per_pixel=float(z_scaling_factor_per_pixel),
+            output_directory=output_directory,
+            log_file=log_file,
+        )
+    finally:
+        if owns_log:
+            log_file.close()
 
 
-# =============================================================================== #
-#   5. Use Radon transform to find the angle of the main gradient directions      #
-# ============================================================================== #
-        # Construct the Radon transform of the gradient images
-        # To accelerate do it in an iterative manner and for G1 only
-        n_dissection = 10
-        angle_start = 0
-        angle_end = 180
-        iteration = 0
-        max_iteration = 4
-        
-        # Arrays to store all angles and RMS values across iterations
-        total_angles = []
-        total_rms = []
-        
-        # Arrays for final values to plot
-        Radon_rms = np.zeros(max_iteration*n_dissection)
-        Radon_angles = np.zeros(max_iteration*n_dissection)
-        
-        while True:
-            log(logFile,"   / Radon search: iteration " + str(iteration) + " angle_start = " + str(angle_start) + " angle_end = " + str(angle_end))
-            theta = np.linspace(angle_start, angle_end, n_dissection, endpoint=False)
-            # Radon_angles[iteration*n_dissection:(iteration+1)*n_dissection] = theta
-            
-            # Put all G1c values zero outside the circle
-            G1c = remove_outside_central_circle(G1)
-            
-            # Compute the Radon transform
-            R1 = radon(G1c, theta=theta, circle=True)
-            
-            # Find the RMS of the angles
-            R1t = np.sum((R1 - np.mean(R1, axis=0))**2, axis=0)
-            # Radon_rms[iteration*n_dissection:(iteration+1)*n_dissection] = R1t
-            
-            # Store all angles and RMS values for this iteration
-            total_angles.extend(theta)
-            total_rms.extend(R1t)
-            
-            # Find the angle with the minimum RMS
-            theta1 = theta[np.argmin(R1t)]
-            angle_start = theta1 - 2*(angle_end - angle_start)/n_dissection
-            angle_end = theta1 + 2*(angle_end - angle_start)/n_dissection
-            iteration += 1
-            if iteration > max_iteration:
-                break
-                
-        # Convert lists to numpy arrays and order angles in ascending order
-        total_angles = np.array(total_angles)
-        total_rms = np.array(total_rms)
-        sorted_indices = np.argsort(total_angles)
-        total_angles = total_angles[sorted_indices]
-        total_rms = total_rms[sorted_indices]
+def _construct_surface(
+    paths: Sequence[Path],
+    *,
+    plot_images_decomposition: bool,
+    gaussian_filter_enabled: bool,
+    sigma: float,
+    remove_curvature: bool,
+    curvature_mode: str,
+    manual_rx: float | None,
+    manual_ry: float | None,
+    cutoff_frequency: float,
+    save_file_type: str,
+    time_stamp: str,
+    pixelsize: float,
+    z_scaling_factor_per_pixel: float,
+    output_directory: Path,
+    log_file: IO[str],
+) -> tuple[str, np.ndarray, np.ndarray, np.ndarray, str]:
+    log(log_file, f"All output is saved in {output_directory.resolve()}")
+    log(log_file, "Parameters:")
+    log(log_file, f"   / Detector images = {len(paths)}")
+    log(log_file, f"   / Plot intermediate images = {plot_images_decomposition}")
+    log(log_file, f"   / Gaussian filter = {gaussian_filter_enabled}")
+    log(log_file, f"   / Gaussian sigma = {sigma}")
+    log(log_file, f"   / Remove curvature = {remove_curvature}")
+    log(log_file, f"   / FFT cutoff frequency = {cutoff_frequency}")
+    log(log_file, f"   / Output file type = {save_file_type or 'do not save'}")
+    log(log_file, f"   / Pixel size = {pixelsize} m")
+    log(log_file, f"   / Z scaling factor per pixel = {z_scaling_factor_per_pixel} 1/m")
+    log(log_file, f"Images folder: {paths[0].resolve().parent}")
+    log(log_file, "Image names:")
+    for path in paths:
+        log(log_file, f"    / {path.name}")
 
-        theta2 = theta1 + 90
-        if theta2 > 180:
-            theta2 = theta2 - 180
-        # Save theta angles in log file
-        log(logFile,"theta1 = " + str(theta1))
-        log(logFile,"theta2 = " + str(theta2))
+    images = [_read_image(path) for path in paths]
+    widths = {image.shape[1] for image in images}
+    if len(widths) != 1:
+        raise ValueError("All detector images must have the same width")
 
-        if Plot_images_decomposition:
-            filename = "RadonTransformRMS" + timeStamp + ".pdf"
-            plot_radon_rms(total_angles, total_rms, theta1, theta2, filename=filename)
-            log(logFile,"Radon transform RMS saved to " + filename)
+    # Preserve the footer marker used by the reference data while applying the
+    # same crop safely to every detector image.
+    crop_rows: list[int] = []
+    for image in images:
+        crop = image.shape[0]
+        row_means = np.mean(image, axis=1)
+        marker = np.flatnonzero(np.abs(row_means[1:] - 1437.0) < 2)
+        if marker.size:
+            crop = max(1, int(marker[0]))
+        crop_rows.append(crop)
+    cut_y = min(crop_rows)
+    if cut_y < 2:
+        raise ValueError("Automatic footer detection left too little image data")
+    log(log_file, f"SEM data rows retained: {cut_y}")
+    image_stack = np.stack(
+        [np.nan_to_num(image[:cut_y, :], copy=False) for image in images], axis=0
+    )
 
-# =================================================================================== #
-#   6. Reorient gradients along x and y directions (oriented along theta1 and theta2) #
-# =================================================================================== #
-        Gx = np.cos(theta1*np.pi/180.)*G1 + np.cos(theta2*np.pi/180.)*G2
-        Gy = np.sin(theta1*np.pi/180.)*G1 + np.sin(theta2*np.pi/180.)*G2
+    if gaussian_filter_enabled and sigma > 0:
+        image_stack = gaussian_filter(image_stack, sigma=(0, sigma, sigma))
+        log(log_file, f"Gaussian filter with sigma = {sigma} applied to all images.")
 
-        # Remove macroscopic tilt
-        Gx -= np.mean(Gx)
-        Gy -= np.mean(Gy)
+    intensity, gradient_1, gradient_2 = compute_image_gradients(image_stack)
+    if plot_images_decomposition:
+        filename = output_directory / f"Images_decomposition{time_stamp}.png"
+        _plot_image_decomposition(image_stack, intensity, gradient_1, gradient_2, filename)
+        log(log_file, f"Images decomposition saved to {filename}")
 
-        if Plot_images_decomposition:
-            # Create a GridSpec layout with 2 rows and 2 columns
-            # The top row will contain the images and the bottom row will contain the colorbars
-            gs = gridspec.GridSpec(2, 2, height_ratios=[1, 0.05])
+    theta_1, angles, rms = _find_principal_angle(gradient_1, log_file)
+    theta_2 = (theta_1 + 90.0) % 180.0
+    log(log_file, f"theta1 = {theta_1}")
+    log(log_file, f"theta2 = {theta_2}")
+    if plot_images_decomposition:
+        filename = output_directory / f"RadonTransformRMS{time_stamp}.pdf"
+        _plot_radon_rms(angles, rms, theta_1, theta_2, filename)
+        log(log_file, f"Radon transform RMS saved to {filename}")
 
-            fig = plt.figure(figsize=(15, 8))
+    radians_1, radians_2 = np.deg2rad((theta_1, theta_2))
+    gradient_rows = np.cos(radians_1) * gradient_1 + np.cos(radians_2) * gradient_2
+    gradient_columns = np.sin(radians_1) * gradient_1 + np.sin(radians_2) * gradient_2
+    gradient_rows -= np.mean(gradient_rows)
+    gradient_columns -= np.mean(gradient_columns)
 
-            # First image and its colorbar
-            ax1 = fig.add_subplot(gs[0, 0])
-            cax1 = fig.add_subplot(gs[1, 0])
-            im1 = ax1.imshow(Gx)
-            plt.colorbar(im1, cax=cax1, orientation='horizontal')
-            ax1.set_title("Gx")
+    if plot_images_decomposition:
+        figure = plt.figure(figsize=(15, 8))
+        grid = gridspec.GridSpec(2, 2, height_ratios=[1, 0.05])
+        for index, (gradient, title) in enumerate(
+            ((gradient_rows, "Gradient along rows"), (gradient_columns, "Gradient along columns"))
+        ):
+            axis = figure.add_subplot(grid[0, index])
+            color_axis = figure.add_subplot(grid[1, index])
+            shown = axis.imshow(gradient)
+            figure.colorbar(shown, cax=color_axis, orientation="horizontal")
+            axis.set_title(title)
+        figure.tight_layout()
+        filename = output_directory / f"Gradients{time_stamp}.png"
+        figure.savefig(filename, dpi=300)
+        plt.close(figure)
+        log(log_file, f"Gradient images saved to {filename}")
 
-            # Second image and its colorbar
-            ax2 = fig.add_subplot(gs[0, 1])
-            cax2 = fig.add_subplot(gs[1, 1])
-            im2 = ax2.imshow(Gy)
-            plt.colorbar(im2, cax=cax2, orientation='horizontal')
-            ax2.set_title("Gy")
-            plt.tight_layout()
+    z = reconstruct_surface_fft(gradient_rows, gradient_columns, cutoff_frequency)
+    z *= 1e6 * z_scaling_factor_per_pixel * pixelsize
 
-            # Save with a unique identifier with a time tag and save in info in log file
-            filename = "Gradients" + timeStamp + ".png"
-            fig.savefig(filename, dpi=300)
-            log(logFile,"Gradients along x and y directions are saved to " + filename)
+    rows, columns = z.shape
+    pre_x, pre_y = np.meshgrid(
+        np.arange(columns) * pixelsize * 1e6,
+        np.arange(rows) * pixelsize * 1e6,
+    )
+    return_message = ""
+    if remove_curvature:
+        z, return_message = _remove_curvature(
+            z, pre_x, pre_y, curvature_mode, manual_rx, manual_ry, log_file
+        )
 
-# ========================================================= #
-#     7. Reconstruct the surface from gradients Gx,Gy       #
-# ========================================================= #
-        reconstruction_type = ""
-        if ReconstructionMode == "FFT":
-            z = reconstruct_surface_FFT(Gx, Gy, cutoff_frequency)
-            reconstruction_type = "FFT"
-        elif ReconstructionMode == "DirectIntegration":
-            z = reconstruct_surface_direct_integration(Gx, Gy, pixelsize)
-            reconstruction_type = "DirectIntegration"
-        else:
-            log(logFile,"Error, unknown reconstruction mode")
-            logFile.close()
-            return None      
+    z = np.rot90(z)
+    x = np.arange(z.shape[1]) * pixelsize * 1e6
+    y = np.arange(z.shape[0]) * pixelsize * 1e6
+    X, Y = np.meshgrid(x, y)
 
-        # convert to micrometers and scale according to user-defined scaling
-        scalingFactorAndUnits = 1e6 * ZscalingFactor * tilt_sensitivity_factor
-        z = scalingFactorAndUnits * z 
-        n,m = z.shape
-        X,Y = np.meshgrid(np.arange(0, m*pixelsize*1e6, pixelsize*1e6), np.arange(0, n*pixelsize*1e6, pixelsize*1e6))
+    figure, axis = plt.subplots(figsize=(8, 10))
+    extent = [x[-1] if x.size else 0, 0, 0, y[-1] if y.size else 0]
+    shown = axis.imshow(z, extent=extent, interpolation="none")
+    axis.set_xlabel("y (micrometres)")
+    axis.set_ylabel("x (micrometres)")
+    axis.set_title("Reconstructed surface")
+    divider = make_axes_locatable(axis)
+    color_axis = divider.append_axes("top", size="5%", pad=0.5)
+    colorbar = figure.colorbar(shown, cax=color_axis, orientation="horizontal")
+    colorbar.set_label("z (micrometres)")
+    color_axis.xaxis.set_ticks_position("top")
+    color_axis.xaxis.set_label_position("top")
+    figure.tight_layout()
+    surface_image = output_directory / f"Surface_FFT{time_stamp}.png"
+    figure.savefig(surface_image, dpi=300, bbox_inches="tight")
+    plt.close(figure)
+    log(log_file, f"FFT-reconstructed surface saved to {surface_image}")
 
-# ========================================================= #
-#          8. Remove curvature defect                       #
-# ========================================================= #
-        if RemoveCurvature:
-            if curvature_mode == "manual" and manual_rx is not None and manual_ry is not None:
-                log(logFile, "Applying manual curvature correction.")
-                # Convert Rx and Ry from meters (GUI) to micrometers (surface units)
-                Rx_um = manual_rx * 1e6
-                Ry_um = manual_ry * 1e6
-                
-                # Create a parabolic surface with the given Rx, Ry but with a temporary vertical shift of 0
-                # The parabolic_surface function uses the center of the image as the vertex (x0, y0)
-                P_base = parabolic_surface([Rx_um, Ry_um, 0.0], X, Y)
-                
-                # Find the optimal vertical shift 'c' that minimizes the sum of squared differences
-                c = np.mean(z - P_base)
-                
-                # Create the final parabolic surface with the optimal shift and subtract it
-                P_final = parabolic_surface([Rx_um, Ry_um, c], X, Y)
-                z -= P_final
-                
-                log(logFile, f"Curvature manually removed: Rx = {manual_rx:.2e} m, Ry = {manual_ry:.2e} m, optimal dz = {c:.2f} um")
+    figure, axis = plt.subplots(figsize=(8, 8 * z.shape[0] / z.shape[1]))
+    axis.imshow(z, cmap="gray")
+    axis.set_axis_off()
+    axis.set_aspect("auto")
+    figure.subplots_adjust(left=0, right=1, top=1, bottom=0)
+    grayscale_image = output_directory / f"Surface_BW_FFT{time_stamp}.png"
+    figure.savefig(grayscale_image, dpi=300)
+    plt.close(figure)
 
-            elif curvature_mode == "automatic":
-                log(logFile, "Applying automatic curvature correction.")
-                # First, fit parabolas at the edges to get initial guess 
-                xlin = X[0,:].copy()
-                ylin = Y[:,0].copy()
-                ZXlin = z[0,:].copy()
-                ZYlin = z[:,0].copy()
-                def parabola(x,x0,R,z0):
-                    return (x-x0)**2/(2*R) + z0
+    output_type = save_file_type.strip().upper()
+    if output_type == "CSV":
+        filename = output_directory / f"Surface{time_stamp}.csv"
+        with filename.open("w", encoding="utf-8", newline="") as stream:
+            stream.write("# x (um), y (um), z (um)\n")
+            for row in range(z.shape[0]):
+                for column in range(z.shape[1]):
+                    stream.write(
+                        f"{X[row, column]:.6f},{Y[row, column]:.6f},"
+                        f"{z[row, column]:.6f}\n"
+                    )
+        log(log_file, f"Surface saved to {filename}")
+    elif output_type == "NPZ":
+        filename = output_directory / f"Surface{time_stamp}.npz"
+        np.savez(filename, X=X, Y=Y, Z=z)
+        log(log_file, f"Surface saved to {filename}")
+    elif output_type == "VTK":
+        filename = output_directory / f"Surface{time_stamp}.vts"
+        write_vtk(filename, X, Y, z)
+        log(log_file, f"Surface saved to {filename}")
+    elif output_type not in ("", "DO NOT SAVE", "NONE"):
+        raise ValueError("Output type must be CSV, NPZ, VTK, or empty")
+    else:
+        log(log_file, "Surface data were not saved")
 
-                try:
-                    popt, pconv  = curve_fit(parabola, xlin, ZXlin)
-                    poptneg, pconvneg  = curve_fit(parabola, xlin, -ZXlin)
-                    if popt[1] < poptneg[1]:    
-                        Rx = popt[1]
-                    else:
-                        Rx = -poptneg[1]                
-                    popt, pconv  = curve_fit(parabola, ylin, ZYlin)
-                    poptneg, pconvneg  = curve_fit(parabola, ylin, -ZYlin)
-                    if popt[1] < poptneg[1]:
-                        Ry = popt[1]
-                    else:
-                        Ry = -poptneg[1]
-                    Lx = np.max(X[0,:]) - np.min(X[0,:])
-                    Ly = np.max(Y[:,0]) - np.min(Y[:,0])
-
-                    initial_params = [Rx, Ry, 0.0]
-                    result = minimize(objective_function, initial_params,
-                                        args=(X, Y, z),
-                                        bounds=[(-np.inf, np.inf), (-np.inf, np.inf), (-np.inf, np.inf)])
-                    error = objective_function(result.x, X, Y, z)
-
-                    # Subtract the fitted parabolic surface
-                    Rx_fit, Ry_fit, dz_fit = result.x
-                    P = parabolic_surface(result.x, X, Y)
-                    z -= P
-
-                    if Rx_fit < 0 and Ry_fit < 0:
-                        log(logFile, f"Curvature was successfully removed: Rx = {Rx_fit:.2f} um, Ry = {Ry_fit:.2f} um, dz = {dz_fit:.2f} um")
-                    elif Rx_fit * Ry_fit < 0:
-                        log(logFile, f"WARNING! WARNING! WARNING!\nWarning: Wrong order of images. Image was reconstructed but the results are not reliable. Images should be reordered in a different way: Rx = {Rx_fit:.2f} um, Ry = {Ry_fit:.2f} um, dz = {dz_fit:.2f} um")
-                        return_message = "Warning: Wrong order of images. The result is not reliable. Reshuffle images and run again."
-                    else: # if both curvatures are negative, the image should be flipped
-                        log(logFile, f"Curvatures were successfully removed: Rx = {Rx_fit:.2f} um, Ry = {Ry_fit:.2f} um, dz = {dz_fit:.2f} um")
-                        log(logFile, "The reconstructed surface is flipped.")
-                        z *= -1
-                except Exception as e:
-                    log(logFile, f"Curvature removal skipped due to fitting error: {e}")
-
-#========================================================= #
-#            Plot the reconstructed surface                #
-#========================================================= #
-
-        fig, ax = plt.subplots(figsize=(8,10))
-        z = np.rot90(z)
-        img = ax.imshow(z, extent=[1e6*X.shape[0]*pixelsize, 0, 0, 1e6*X.shape[1]*pixelsize], interpolation="none")
-        ax.set_xlabel(r"$y$, $\mu$m")
-        ax.set_ylabel(r"$x$, $\mu$m")
-        ax.set_title("Reconstructed surface")
-        divider = make_axes_locatable(ax)
-        cax = divider.append_axes("top", size="5%", pad=0.5)
-        cbar = plt.colorbar(img, cax=cax, orientation='horizontal')
-        cbar.set_label(r'$z$, $\mu$m')
-        cax.xaxis.set_ticks_position('top')
-        cax.xaxis.set_label_position('top')
-
-        filename = "Surface_"+reconstruction_type + timeStamp + ".png"
-        plt.tight_layout()
-        fig.savefig(filename, dpi=300, bbox_inches='tight')
-        returnImgName = filename
-        log(logFile, "Surface reconstructed using " + reconstruction_type + " is saved to " + filename)
-
-        # Plot the surface again in the original orientation in grayscale, keeping aspect ratio
-        fig,ax = plt.subplots(figsize=(8,8*X.shape[1]/X.shape[0]))
-        ax.imshow(z, cmap='gray')
-        ax.axis('off')
-        ax.set_aspect('auto')
-        fig.subplots_adjust(left=0, right=1, top=1, bottom=0, wspace=0, hspace=0)
-        filename = "Surface_BW_" + reconstruction_type + timeStamp + ".png"
-        fig.savefig(filename, dpi=300)
-
-#========================================================= #
-#     Save reconstructed surface in different formats      #
-#========================================================= #
-
-        x = np.linspace(0, z.shape[1]*pixelsize*1e6, num = z.shape[1])
-        y = np.linspace(0, z.shape[0]*pixelsize*1e6, num = z.shape[0])
-        X, Y = np.meshgrid(x, y)
-        # save in ASCII file readable by gnuplot with the format # x, y, z and empty lines between each row (if needed)
-        if save_file_type == "CSV":
-            filename = "Surface" + timeStamp + ".csv"
-            log(logFile,"Surface saved to " + filename)
-            with open(Path(filename), "w") as f:
-                f.write("# x (um), y (um), z (um)\n")           
-                for i in range(z.shape[0]):
-                    for j in range(z.shape[1]):
-                        f.write("{0:.6f},{1:.6f},{2:.6f}\n".format(X[i,j], Y[i,j], z[i,j]))                
-                # f.write("\n") # if needed for gnuplot, uncomment
-        # Save as npz file
-        elif save_file_type == "NPZ":
-            filename = "Surface" + timeStamp + ".npz"
-            np.savez(Path(filename), X=X, Y=Y, Z=z)
-            log(logFile,"Surface saved to " + filename)
-        # Save as vts (vtk structured grid) file
-        elif save_file_type == "VTK":
-            filename = "Surface" + timeStamp + ".vts"
-            write_vtk(Path(filename), X, Y, z)
-            log(logFile,"Surface saved to " + filename)
-        else:
-            log(logFile,"Surface is not saved")
-
-        now = datetime.datetime.now()
-        log(logFile,"Successfully finished at " + now.strftime("%Y-%m-%d %H:%M:%S") + "\n")
-
-        # Save RMS of the surface
-        log(logFile,"RMS of the surface = " + str(np.std(z)))
-        logFile.close()
+    log(log_file, f"RMS of the surface = {np.std(z)}")
+    log(
+        log_file,
+        "Successfully finished at " + _datetime.datetime.now().isoformat(timespec="seconds"),
+    )
+    return str(surface_image), X, Y, z, return_message
 
 
-        return returnImgName, X, Y, z, return_message
-
+def constructSurface(
+    imgNames: Sequence[str | Path],
+    Plot_images_decomposition: bool = False,
+    GaussFilter: bool = False,
+    sigma: float = 1.0,
+    ReconstructionMode: str = "FFT",
+    RemoveCurvature: bool = False,
+    curvature_mode: str = "automatic",
+    manual_rx: float | None = None,
+    manual_ry: float | None = None,
+    cutoff_frequency: float = 0.0,
+    save_file_type: str = "",
+    time_stamp: bool = False,
+    pixelsize: float | None = None,
+    ZscalingFactorPerPixel: float = 1.0,
+    Z_ref: float | None = None,
+    Z_current: float | None = None,
+    logFile: IO[str] | None = None,
+    output_dir: str | Path = ".",
+):
+    """Compatibility wrapper for the v0.1 camelCase API."""
+    if ReconstructionMode != "FFT":
+        raise ValueError("Direct integration was removed; only FFT reconstruction is supported")
+    if Z_ref is not None or Z_current is not None:
+        warnings.warn(
+            "Z_ref and Z_current are deprecated and ignored; use the calibrated scaling factor only",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    return construct_surface(
+        imgNames,
+        plot_images_decomposition=Plot_images_decomposition,
+        gaussian_filter_enabled=GaussFilter,
+        sigma=sigma,
+        remove_curvature=RemoveCurvature,
+        curvature_mode=curvature_mode,
+        manual_rx=manual_rx,
+        manual_ry=manual_ry,
+        cutoff_frequency=cutoff_frequency,
+        save_file_type=save_file_type,
+        time_stamp=time_stamp,
+        pixelsize=pixelsize,
+        z_scaling_factor_per_pixel=ZscalingFactorPerPixel,
+        output_dir=output_dir,
+        log_file=logFile,
+    )

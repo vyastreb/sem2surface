@@ -1,6 +1,5 @@
-numpy
-matplotlib
-scipy
-scikit-image
-vtk
-pillow
+numpy>=1.23
+matplotlib>=3.7
+scipy>=1.10
+scikit-image>=0.21
+pillow>=9.0

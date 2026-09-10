@@ -1,8 +1,7 @@
 #---------------------------------------------------------------------------#
 #                                                                           #
 # SEM/BSE 3D surface reconstruction: tool to identify z-scaling factor      #
-# based on the Vicker's indenter imprint on the same material (or material  #
-# with a close atomic weight)                                               #
+# based on a Vickers indenter imprint                                       #
 #                                                                           #
 # V.A. Yastrebov, CNRS, MINES Paris, Aug 2023-Dec 2024                      #
 # Licence: BSD 3-Clause                                                     #
@@ -21,40 +20,36 @@ sys.path.append(src_path)
 import sem2surface as s2s
 import numpy as np
 import matplotlib.pyplot as plt
+from pathlib import Path
  
 # Load indentation SEM data, at least 3 images
-imgNames = ["Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_A_05.tif",\
-            "Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_C_05.tif",\
-            "Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_B_05.tif"]
+HERE = Path(__file__).resolve().parent
+imgNames = [HERE / "Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_A_05.tif",
+            HERE / "Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_C_05.tif",
+            HERE / "Indent_20230912_7kV_spot4.5_FOV100um_multiBSE_B_05.tif"]
 # Reconstruction parameters
 GaussFilter = False
 sigma = 1.
-ReconstructionMode = "FFT" 
 cutoff_frequency = 0.0
 RemoveCurvature = False # Do not use the default curvature removal, it is adjusted for the Vicker's indenter imprint here.
 Time_stamp = False
 Plot_images_decomposition = False
 ZscalingFactorPerPixel = 1.
-Z_ref = 26 # For steel (main element Fe, Z=26)
-Z_current = 26 # For steel (main element Fe, Z=26)
 # Indenter parameters
 R = 6 # (micrometers) Radius inside the indenter, should be big enough to include as much of the indenter as possible, but small enough to be kept entirely inside the indenter imprint region
 
 pixelsize = s2s.get_pixel_width(imgNames[0])
-_,X,Y,z,message = s2s.constructSurface(imgNames, 
-                         Plot_images_decomposition, 
-                         GaussFilter, 
-                         sigma, 
-                         ReconstructionMode,
-                         RemoveCurvature=True, 
+_,X,Y,z,message = s2s.construct_surface(imgNames,
+                         plot_images_decomposition=Plot_images_decomposition,
+                         gaussian_filter_enabled=GaussFilter,
+                         sigma=sigma,
+                         remove_curvature=True,
                          cutoff_frequency=cutoff_frequency, 
                          save_file_type="VTK", 
                          time_stamp=Time_stamp, 
                          pixelsize=pixelsize, 
-                         ZscalingFactorPerPixel=ZscalingFactorPerPixel,
-                         Z_ref=Z_ref,
-                         Z_current=Z_current,
-                         logFile=None)
+                         z_scaling_factor_per_pixel=ZscalingFactorPerPixel,
+                         output_dir=HERE)
 if message != "":
     print(message)
 
@@ -221,7 +216,7 @@ im3.set_cmap('coolwarm')
 cbar.set_label(r"Difference, $z_p/\langle z_p \rangle$")
 
 plt.tight_layout()
-fig.savefig(f"Indenter_comparison_Scaling_{ZscalingFactorPerPixel:.4e}_m_minus_1.png", dpi=300)
+fig.savefig(HERE / f"Indenter_comparison_Scaling_{ZscalingFactorPerPixel:.4e}_m_minus_1.png", dpi=300)
 
 # ============================================================================ #
 #   Reconstruct the surface with the identified scaling factor and curvatures  #
@@ -229,19 +224,16 @@ fig.savefig(f"Indenter_comparison_Scaling_{ZscalingFactorPerPixel:.4e}_m_minus_1
 # ============================================================================ #
 
 pixelsize = s2s.get_pixel_width(imgNames[0])
-_,X,Y,z,message = s2s.constructSurface(imgNames, 
-                         Plot_images_decomposition, 
-                         GaussFilter, 
-                         sigma, 
-                         ReconstructionMode,
-                         RemoveCurvature = True, 
+_,X,Y,z,message = s2s.construct_surface(imgNames,
+                         plot_images_decomposition=Plot_images_decomposition,
+                         gaussian_filter_enabled=GaussFilter,
+                         sigma=sigma,
+                         remove_curvature=True,
                          cutoff_frequency=cutoff_frequency, 
                          save_file_type="VTK", 
                          time_stamp=False, 
                          pixelsize=pixelsize, 
-                         ZscalingFactorPerPixel=ZscalingFactorPerPixel, # Since it is the same pixel size, the scaling factor is the same
-                         Z_ref=Z_ref,
-                         Z_current=Z_current,
-                         logFile=None)
+                         z_scaling_factor_per_pixel=ZscalingFactorPerPixel,
+                         output_dir=HERE)
 if message != "":
     print(message)
