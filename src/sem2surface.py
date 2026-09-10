@@ -23,7 +23,7 @@ from scipy.ndimage import gaussian_filter
 from skimage.transform import radon
 
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 DEFAULT_PIXEL_SIZE = 1e-6
 _PIXEL_WIDTH_TAGS = ("PixelWidth=", "Image Pixel Size =")
 

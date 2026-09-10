@@ -1,5 +1,8 @@
 # sem2surface
 
+[![PyPI version](https://img.shields.io/pypi/v/sem2surface.svg)](https://pypi.org/project/sem2surface/)
+[![License: BSD 3-Clause](https://img.shields.io/pypi/l/sem2surface.svg)](https://github.com/vyastreb/sem2surface/blob/master/LICENSE)
+
 `sem2surface` reconstructs a three-dimensional surface from three to five
 multi-detector SEM/BSE images. It extracts two normalized principal images,
 identifies their orientation with a Radon transform, and integrates the resulting
@@ -15,77 +18,48 @@ calibration procedure.
 
 ## Installation
 
-Python 3.10 or newer is required. An isolated virtual environment is strongly
-recommended so the application does not conflict with system Python packages.
-
-### Linux and macOS
-
-Create an environment and install a released version:
+Python 3.10 or newer is required. Install `sem2surface` from PyPI with:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install sem2surface
-sem2surface-gui
+pip install sem2surface
 ```
 
-Until a release is uploaded to PyPI, run the final installation command from
-this source checkout instead:
+If several Python installations are present, use the interpreter explicitly:
 
 ```bash
-python -m pip install .
+python3 -m pip install sem2surface  # Linux or macOS
 ```
-
-On Linux, Tkinter may be packaged separately. For example, Ubuntu and Debian
-users can install it with their system package manager as `python3-tk` before
-creating the environment.
 
 ### Windows
 
 Install Python 3.10 or newer from
 [python.org](https://www.python.org/downloads/windows/). Keep the standard
-`pip`, Tcl/Tk, and Python Launcher components enabled. Then open PowerShell in
-the folder where you want the environment and run:
+`pip`, Tcl/Tk, and Python Launcher components enabled. Then open PowerShell or
+Command Prompt and run:
 
 ```powershell
-py -3 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install sem2surface
+py -m pip install sem2surface
 sem2surface-gui
 ```
 
-If PowerShell blocks the activation script, allow it only for the current
-PowerShell process and retry activation:
+If Windows cannot find the installed launcher, start the GUI through Python:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\.venv\Scripts\Activate.ps1
+py -m sem2surface_gui
 ```
 
-In Command Prompt, activate the same environment with:
+On Linux, Tkinter may be packaged separately. For example, Ubuntu and Debian
+users can install `python3-tk` with their system package manager.
 
-```bat
-.venv\Scripts\activate.bat
+A virtual environment is optional. It is useful when the system Python is
+externally managed, installation permissions are restricted, or other packages
+have conflicting dependencies:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate  # Windows PowerShell: .\.venv\Scripts\Activate.ps1
+python -m pip install sem2surface
 ```
-
-Activation is optional. The GUI can always be launched directly:
-
-```powershell
-.\.venv\Scripts\sem2surface-gui.exe
-```
-
-Before the PyPI release, install either from a source checkout with
-`python -m pip install .` or from the provided wheel:
-
-```powershell
-python -m pip install "C:\path\to\sem2surface-0.2.0-py3-none-any.whl"
-```
-
-Use `deactivate` to leave the environment on any platform. Do not copy a
-virtual environment between computers or move it after creation; create a new
-one and reinstall the package instead.
 
 VTK export is optional because VTK is a large dependency:
 
@@ -227,7 +201,7 @@ For a first trial, create a separate account and API token on
 version:
 
 ```bash
-python -m twine upload --repository testpypi dist/sem2surface-0.2.0*
+python -m twine upload --repository testpypi dist/sem2surface-0.2.1*
 ```
 
 When prompted, use `__token__` as the username and the complete TestPyPI token,
@@ -235,7 +209,7 @@ including its `pypi-` prefix, as the password. Test the uploaded wheel in a new
 environment without resolving dependencies from TestPyPI:
 
 ```bash
-python -m pip install --index-url https://test.pypi.org/simple/ --no-deps sem2surface==0.2.0
+python -m pip install --index-url https://test.pypi.org/simple/ --no-deps sem2surface==0.2.1
 sem2surface --version
 ```
 
@@ -243,7 +217,7 @@ For the real release, create a PyPI account and API token at
 [pypi.org](https://pypi.org/), then run:
 
 ```bash
-python -m twine upload dist/sem2surface-0.2.0*
+python -m twine upload dist/sem2surface-0.2.1*
 ```
 
 PyPI and TestPyPI use separate accounts and tokens. Never commit a token or put
