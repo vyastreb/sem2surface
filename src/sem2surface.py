@@ -261,6 +261,49 @@ def _read_image(path: Path) -> np.ndarray:
     return np.asarray(convert_to_grayscale(array), dtype=np.float64)
 
 
+def _find_sem_data_rows(image: np.ndarray) -> int:
+    """Return the number of rows above a SEM annotation footer.
+
+    FEI and Zeiss exports use different bit depths and footer layouts, but both
+    place a nearly uniform bright separator near the bottom of the image.  A
+    separator is accepted only when the pixels below it have a substantially
+    different median intensity, which avoids treating an isolated bright line
+    in the specimen as a footer.
+    """
+    array = np.asarray(image, dtype=np.float64)
+    if array.ndim != 2:
+        raise ValueError("Footer detection requires a two-dimensional image")
+    rows, columns = array.shape
+    if rows < 16 or columns < 16:
+        return rows
+
+    finite = array[np.isfinite(array)]
+    if finite.size == 0:
+        return rows
+    low, high = np.percentile(finite, (0.1, 99.9))
+    intensity_span = float(high - low)
+    if not np.isfinite(intensity_span) or intensity_span <= 0:
+        return rows
+
+    # The 3% tolerance includes FEI separator values (64512) when a few
+    # saturated specimen pixels raise the 99.9th percentile to 65535.
+    bright_threshold = high - 0.03 * intensity_span
+    bright_fraction = np.mean(array >= bright_threshold, axis=1)
+    first_candidate = max(1, int(np.ceil(0.5 * rows)))
+    minimum_footer_rows = max(4, int(np.ceil(0.01 * rows)))
+    candidate_stop = rows - minimum_footer_rows + 1
+
+    for row in range(first_candidate, candidate_stop):
+        if bright_fraction[row] < 0.98 or bright_fraction[row - 1] >= 0.5:
+            continue
+        preceding_rows = min(64, row)
+        specimen_median = float(np.nanmedian(array[row - preceding_rows : row]))
+        footer_median = float(np.nanmedian(array[row:]))
+        if abs(footer_median - specimen_median) >= 0.10 * intensity_span:
+            return row
+    return rows
+
+
 def _plot_image_decomposition(
     imgs: np.ndarray,
     intensity: np.ndarray,
@@ -537,16 +580,16 @@ def _construct_surface(
     if len(widths) != 1:
         raise ValueError("All detector images must have the same width")
 
-    # Preserve the footer marker used by the reference data while applying the
-    # same crop safely to every detector image.
-    crop_rows: list[int] = []
-    for image in images:
-        crop = image.shape[0]
-        row_means = np.mean(image, axis=1)
-        marker = np.flatnonzero(np.abs(row_means[1:] - 1437.0) < 2)
-        if marker.size:
-            crop = max(1, int(marker[0]))
-        crop_rows.append(crop)
+    # Detect each footer independently, then apply the smallest common crop so
+    # all detector images retain identical dimensions.
+    crop_rows = [_find_sem_data_rows(image) for image in images]
+    for path, image, crop in zip(paths, images, crop_rows):
+        if crop < image.shape[0]:
+            log(
+                log_file,
+                f"SEM annotation footer detected in {path.name}: "
+                f"removed {image.shape[0] - crop} rows",
+            )
     cut_y = min(crop_rows)
     if cut_y < 2:
         raise ValueError("Automatic footer detection left too little image data")
