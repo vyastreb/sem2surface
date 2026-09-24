@@ -147,6 +147,12 @@ decomposition, Radon search, and oriented gradients.
 When timestamps are disabled, an existing output with the same name is replaced.
 Choose a dedicated output folder or enable timestamps when results must be kept.
 
+For TIFF acquisitions, `sem2surface` automatically removes a microscope
+annotation footer when it detects a nearly uniform bright separator followed by
+a statistically distinct lower band. The detector works with both 8-bit Zeiss
+and 16-bit FEI exports, leaves footer-free images unchanged, and records every
+detected crop in the processing log.
+
 ## Reference examples and scaling
 
 The [examples directory](https://github.com/vyastreb/sem2surface/tree/master/examples)
@@ -166,6 +172,15 @@ python examples/Surface_1/test_without_gui.py
 
 <!-- PyPI cannot resolve repository-relative images. Keep this absolute URL. -->
 ![Reconstruction of the indented surface](https://raw.githubusercontent.com/vyastreb/sem2surface/master/img/indent_superposition.jpg)
+
+## Changes in 0.2.2
+
+- Replaced the historical hard-coded footer threshold with bit-depth-independent
+  SEM annotation-band detection.
+- Added safeguards against cropping isolated bright lines in specimen data.
+- Added per-image logging of detected footers and removed row counts.
+- Added regression coverage for 8-bit Zeiss, 16-bit FEI, footer-free, and
+  isolated-line images.
 
 ## Development
 
@@ -201,7 +216,7 @@ For a first trial, create a separate account and API token on
 version:
 
 ```bash
-python -m twine upload --repository testpypi dist/sem2surface-0.2.1*
+python -m twine upload --repository testpypi dist/sem2surface-0.2.2*
 ```
 
 When prompted, use `__token__` as the username and the complete TestPyPI token,
@@ -209,7 +224,7 @@ including its `pypi-` prefix, as the password. Test the uploaded wheel in a new
 environment without resolving dependencies from TestPyPI:
 
 ```bash
-python -m pip install --index-url https://test.pypi.org/simple/ --no-deps sem2surface==0.2.1
+python -m pip install --index-url https://test.pypi.org/simple/ --no-deps sem2surface==0.2.2
 sem2surface --version
 ```
 
@@ -217,7 +232,7 @@ For the real release, create a PyPI account and API token at
 [pypi.org](https://pypi.org/), then run:
 
 ```bash
-python -m twine upload dist/sem2surface-0.2.1*
+python -m twine upload dist/sem2surface-0.2.2*
 ```
 
 PyPI and TestPyPI use separate accounts and tokens. Never commit a token or put

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sem2surface"
-version = "0.2.1"
+version = "0.2.2"
 description = "3D surface reconstruction from multi-detector SEM/BSE images"
 readme = "README.md"
 requires-python = ">=3.10"
