@@ -1,4 +1,4 @@
-# sem2surface
+# sem2surface ![sem2surface logo](https://raw.githubusercontent.com/vyastreb/sem2surface/master/src/logo.png)
 
 [![PyPI version](https://img.shields.io/pypi/v/sem2surface.svg)](https://pypi.org/project/sem2surface/)
 [![License: BSD 3-Clause](https://img.shields.io/pypi/l/sem2surface.svg)](https://github.com/vyastreb/sem2surface/blob/master/LICENSE)
