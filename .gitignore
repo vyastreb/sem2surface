@@ -10,6 +10,10 @@ dist/
 venv/
 *.bak
 
+# Local agent instructions and GitHub workflows.
+/AGENTS.md
+/.github/workflows/
+
 # Outputs created when running from the repository root.
 /Gradients*.png
 /Images_decomposition*.png
